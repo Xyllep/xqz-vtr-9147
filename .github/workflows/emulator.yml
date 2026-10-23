@@ -109,28 +109,28 @@ jobs:
         run: |
           SDK=/usr/local/lib/android/sdk
           ADB=$SDK/platform-tools/adb
-          $ADB root; sleep 3
-          $ADB remount || true; sleep 2
-          $ADB shell "su 0 sh -c 'mount -o remount,rw / 2>/dev/null; mount -o remount,rw /system 2>/dev/null'"
-          # проверяем где лежит build.prop
-          $ADB shell "su 0 sh -c 'ls -la /system/build.prop /system/system/build.prop 2>/dev/null'" || true
-          $ADB shell "su 0 sh -c '
-            for B in /system/build.prop /system/system/build.prop /system/etc/prop.default; do
-              [ -f \$B ] || continue
-              mount -o remount,rw / 2>/dev/null
-              mount -o remount,rw /system 2>/dev/null
-              sed -i s/^ro.product.model=.*/ro.product.model=Pixel\\ 7\\ Pro/ \$B
-              sed -i s/^ro.product.brand=.*/ro.product.brand=google/ \$B
-              sed -i s/^ro.product.device=.*/ro.product.device=cheetah/ \$B
-              sed -i s/^ro.product.name=.*/ro.product.name=cheetah/ \$B
-              sed -i s/^ro.product.manufacturer=.*/ro.product.manufacturer=Google/ \$B
-            done
-          '" || true
-          # resetprop (если есть) иначе значения увидим только после ребута — не делаем ребут, ставим через setprop для текущей сессии
-          $ADB shell setprop persist.sys.timezone Europe/Moscow 2>/dev/null || true
+          $ADB root || true
+          sleep 3
+          $ADB remount || true
+          sleep 2
+          cat > spoof.sh <<'SOF'
+          for B in /system/build.prop /system/system/build.prop /system/etc/prop.default; do
+            [ -f "$B" ] || continue
+            mount -o remount,rw / 2>/dev/null
+            mount -o remount,rw /system 2>/dev/null
+            sed -i s/^ro.product.model=.*/ro.product.model=Pixel\ 7\ Pro/ "$B"
+            sed -i s/^ro.product.brand=.*/ro.product.brand=google/ "$B"
+            sed -i s/^ro.product.device=.*/ro.product.device=cheetah/ "$B"
+            sed -i s/^ro.product.name=.*/ro.product.name=cheetah/ "$B"
+            sed -i s/^ro.product.manufacturer=.*/ro.product.manufacturer=Google/ "$B"
+            echo "patched $B"
+          done
+          echo done
+          SOF
+          $ADB push spoof.sh /data/local/tmp/spoof.sh
+          $ADB shell su 0 sh /data/local/tmp/spoof.sh || true
+          $ADB shell setprop persist.sys.timezone Europe/Moscow || true
           $ADB shell "settings put system time_12_24 24" || true
-          # видимая модель для приложений, читающих системные свойства
-          $ADB shell "su 0 sh -c 'resetprop ro.product.model "Pixel 7 Pro" 2>/dev/null; resetprop ro.product.device cheetah 2>/dev/null; true'" || true
 
       - name: Set geo (Moscow)
         run: |
