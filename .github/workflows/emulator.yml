@@ -208,14 +208,18 @@ jobs:
             $ADB shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION 2>/dev/null || true
             $ADB shell pm grant $PKG android.permission.ACCESS_BACKGROUND_LOCATION 2>/dev/null || true
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            # гость крашится ~60с после старта Карт — скриним ДО этого
-            sleep 20
-            $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
-            echo "maps screenshot size: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
-            $ADB shell input tap 720 2670 || true
-            sleep 3
-            $ADB exec-out screencap -p > screenshot_maps2.png 2>/dev/null || true
-            sleep 10
+            sleep 6
+            for a in 1 2 3 4 5 6 7 8; do
+              $ADB exec-out screencap -p > shot_tmp.png 2>/dev/null || break
+              SZ=$(stat -c%s shot_tmp.png 2>/dev/null || echo 0)
+              if [ "$SZ" -gt 100000 ]; then
+                cp shot_tmp.png screenshot_maps.png
+                echo "got screenshot at attempt $a, size $SZ"
+                break
+              fi
+              sleep 4
+            done
+            echo "maps screenshot: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
           fi
 
       - name: Run automation script
