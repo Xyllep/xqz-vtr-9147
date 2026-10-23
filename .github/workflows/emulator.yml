@@ -200,10 +200,14 @@ jobs:
             $ADB shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION 2>/dev/null || true
             $ADB shell pm grant $PKG android.permission.ACCESS_BACKGROUND_LOCATION 2>/dev/null || true
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            sleep 25
-            # прогнать возможные диалоги (onboarding/разрешения) тапом по правому нижнему углу и Enter
-            $ADB shell input keyevent KEYCODE_ENTER || true
-            sleep 5
+            # гость крашится ~60с после старта Карт — скриним ДО этого
+            sleep 20
+            $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
+            echo "maps screenshot size: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
+            $ADB shell input tap 720 2670 || true
+            sleep 3
+            $ADB exec-out screencap -p > screenshot_maps2.png 2>/dev/null || true
+            sleep 10
           fi
 
       - name: Run automation script
