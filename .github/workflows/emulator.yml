@@ -109,20 +109,28 @@ jobs:
         run: |
           SDK=/usr/local/lib/android/sdk
           ADB=$SDK/platform-tools/adb
-          $ADB root; sleep 2
-          # build.prop: реальный Pixel 7 Pro (Cheetah)
+          $ADB root; sleep 3
+          $ADB remount || true; sleep 2
+          $ADB shell "su 0 sh -c 'mount -o remount,rw / 2>/dev/null; mount -o remount,rw /system 2>/dev/null'"
+          # проверяем где лежит build.prop
+          $ADB shell "su 0 sh -c 'ls -la /system/build.prop /system/system/build.prop 2>/dev/null'" || true
           $ADB shell "su 0 sh -c '
-            mount -o remount,rw /system 2>/dev/null
-            B=/system/build.prop
-            sed -i s/^ro.product.model=.*/ro.product.model=Pixel\ 7\ Pro/ $B
-            sed -i s/^ro.product.brand=.*/ro.product.brand=google/ $B
-            sed -i s/^ro.product.device=.*/ro.product.device=cheetah/ $B
-            sed -i s/^ro.product.name=.*/ro.product.name=cheetah/ $B
-            sed -i s/^ro.product.manufacturer=.*/ro.product.manufacturer=Google/ $B
-            grep -q ro.product.model= $B || echo ro.product.model=Pixel\ 7\ Pro >> $B
-          '" 2>/dev/null || echo "remount not possible, skipping build.prop (props via setprop)"
-          $ADB shell setprop ro.product.model "Pixel 7 Pro" 2>/dev/null || true
-          $ADB shell setprop ro.kernel.qemu 0 2>/dev/null || true
+            for B in /system/build.prop /system/system/build.prop /system/etc/prop.default; do
+              [ -f \$B ] || continue
+              mount -o remount,rw / 2>/dev/null
+              mount -o remount,rw /system 2>/dev/null
+              sed -i s/^ro.product.model=.*/ro.product.model=Pixel\\ 7\\ Pro/ \$B
+              sed -i s/^ro.product.brand=.*/ro.product.brand=google/ \$B
+              sed -i s/^ro.product.device=.*/ro.product.device=cheetah/ \$B
+              sed -i s/^ro.product.name=.*/ro.product.name=cheetah/ \$B
+              sed -i s/^ro.product.manufacturer=.*/ro.product.manufacturer=Google/ \$B
+            done
+          '" || true
+          # resetprop (если есть) иначе значения увидим только после ребута — не делаем ребут, ставим через setprop для текущей сессии
+          $ADB shell setprop persist.sys.timezone Europe/Moscow 2>/dev/null || true
+          $ADB shell "settings put system time_12_24 24" || true
+          # видимая модель для приложений, читающих системные свойства
+          $ADB shell "su 0 sh -c 'resetprop ro.product.model "Pixel 7 Pro" 2>/dev/null; resetprop ro.product.device cheetah 2>/dev/null; true'" || true
 
       - name: Set geo (Moscow)
         run: |
@@ -156,6 +164,16 @@ jobs:
           ADB=$SDK/platform-tools/adb
           MIN=${{ github.event.inputs.session_minutes }}
           END=$((SECONDS + MIN*60))
+          # дождаться конца анимации загрузки
+          until [ "$($ADB shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')" = "stopped" ]; do sleep 5; done
+          sleep 5
+          # разбудить экран и снять keyguard
+          $ADB shell input keyevent KEYCODE_WAKEUP
+          sleep 2
+          $ADB shell wm dismiss-keyguard || true
+          sleep 3
+          $ADB shell input keyevent KEYCODE_HOME || true
+          sleep 3
           $ADB exec-out screencap -p > screenshot_boot.png
           $ADB shell getprop > props_dump.txt || true
           while [ $SECONDS -lt $END ]; do
