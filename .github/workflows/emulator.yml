@@ -40,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.android/avd
-          key: avd-pixel7pro-v2
+          key: avd-pixel7pro-v3
 
       - name: Create realistic AVD (Pixel 7 Pro)
         run: |
@@ -59,7 +59,7 @@ jobs:
             for kv in "hw.lcd.density=560" "hw.lcd.width=1440" "hw.lcd.height=3120" \
                       "hw.gps=yes" "hw.sensors.proximity=yes" "hw.sensors.light=yes" \
                       "hw.battery=yes" "hw.battery.status=discharging" "hw.battery.level=87" \
-                      "hw.camera.back=virtualscene" "hw.wifi=yes" "hw.ramSize=2048" \
+                      "hw.camera.back=virtualscene" "hw.wifi=yes" "hw.ramSize=3072" \
                       "hw.cpu.arch=x86_64" "fastboot.forceColdBoot=no"; do
               echo "$kv" | tr '=' ' ' | xargs -I{} true
               echo "$(echo $kv | cut -d= -f1) = $(echo $kv | cut -d= -f2)" >> $CFG
@@ -121,7 +121,7 @@ jobs:
           nohup $SDK/emulator/emulator -avd pixel7pro \
             -no-window -no-snapshot -no-boot-anim -no-metrics \
             -gpu swiftshader_indirect -accel on \
-            -writable-system -memory 2048 -cores 2 \
+            -writable-system -memory 3072 -cores 2 \
             -qemu -enable-kvm > emulator.log 2>&1 &
           ADB=$SDK/platform-tools/adb
           $ADB wait-for-device
