@@ -227,8 +227,8 @@ jobs:
           if $ADB shell pm list packages | grep -q "$PKG"; then
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
             sleep 25
-            for i in 1 2 3 4 5; do
-              $ADB shell input tap 720 2645 || true
+            for i in 1 2 3 4 5 6; do
+              $ADB shell input tap 720 2670 || true
               sleep 3
               $ADB shell input tap 720 2980 || true
               sleep 2
