@@ -1,0 +1,104 @@
+name: Android Emulator Session
+on:
+  workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: "Длительность сессии (минут, макс 350)"
+        default: "120"
+      script:
+        description: "Скрипт автоматизации в scripts/ для запуска (пусто = просто держать эмулятор)"
+        default: ""
+      geo:
+        description: "Гео: 'lat lon' (напр. 55.75 37.62)"
+        default: ""
+      model:
+        description: "Модель устройства для getprop (напр. Pixel 7 Pro)"
+        default: ""
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          sudo -i
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo chmod 666 /dev/kvm
+
+      - name: AVD info
+        run: |
+          echo "CPU cores: $(nproc), RAM: $(free -g | awk '/Mem/{print $2}')G"
+          /usr/local/lib/android/sdk/emulator/emulator -version
+          /usr/local/lib/android/sdk/emulator/emulator -list-avds || true
+
+      - name: Create AVD (custom model)
+        run: |
+          echo "no" | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/avdmanager create avd \
+            -n test -k "system-images;android-33;google_apis;x86_64" -d pixel_7_pro
+          # переопределяем модель устройства
+          AVDCFG=~/.android/avd/test.avd/config.ini
+          if [ -n "${{ github.event.inputs.model }}" ]; then
+            sed -i "s/^hw.device.name=.*/hw.device.name=pixel_7_pro/" $AVDCFG || true
+            echo "ro.product.model=${{ github.event.inputs.model }}" >> $AVDCFG
+            echo "hw.device.model=${{ github.event.inputs.model }}" >> $AVDCFG
+          fi
+          cat $AVDCFG
+
+      - name: Run emulator
+        timeout-minutes: 15
+        run: |
+          nohup /usr/local/lib/android/sdk/emulator/emulator -avd test \
+            -no-window -gpu swiftshader_indirect -no-snapshot -no-audio -no-boot-anim \
+            -accel on -memory 3072 -cores 2 > emulator.log 2>&1 &
+          /usr/local/lib/android/sdk/platform-tools/adb wait-for-device
+          echo "Ожидание полной загрузки..."
+          until [ "$(/usr/local/lib/android/sdk/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 5; done
+          echo "Эмулятор загружен"
+
+      - name: Set geo
+        if: ${{ github.event.inputs.geo != '' }}
+        run: |
+          LAT=$(echo "${{ github.event.inputs.geo }}" | awk '{print $1}')
+          LON=$(echo "${{ github.event.inputs.geo }}" | awk '{print $2}')
+          /usr/local/lib/android/sdk/platform-tools/adb emu geo fix $LON $LAT
+          /usr/local/lib/android/sdk/platform-tools/adb shell pm grant android.permission.ACCESS_FINE_LOCATION com.google.android.apps.maps 2>/dev/null || true
+
+      - name: Install APK (если есть в репо)
+        run: |
+          for apk in $(ls *.apk 2>/dev/null); do
+            /usr/local/lib/android/sdk/platform-tools/adb install -r "$apk"
+          done
+
+      - name: Run automation script
+        if: ${{ github.event.inputs.script != '' }}
+        run: |
+          chmod +x scripts/${{ github.event.inputs.script }} || true
+          scripts/${{ github.event.inputs.script }}
+
+      - name: Keep alive / watch
+        run: |
+          MIN=${{ github.event.inputs.session_minutes }}
+          END=$((SECONDS + MIN*60))
+          while [ $SECONDS -lt $END ]; do
+            sleep 300
+            echo "--- $(date) uptime check ---"
+            /usr/local/lib/android/sdk/platform-tools/adb shell getprop sys.boot_completed || true
+            /usr/local/lib/android/sdk/platform-tools/adb exec-out screencap -p > screen_$(date +%H%M).png || true
+          done
+
+      - name: Collect logs
+        if: always()
+        run: |
+          /usr/local/lib/android/sdk/platform-tools/adb shell screencap -p screen_final.png || true
+          tar czf artifacts.tgz emulator.log *.png 2>/dev/null || tar czf artifacts.tgz emulator.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-logs
+          path: artifacts.tgz

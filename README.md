@@ -1,0 +1,1 @@
+# GHA Android Emulator\n\nЗапуск: Actions → Android Emulator Session → Run workflow.\n\nПараметры:\n- session_minutes: длительность\n- script: имя файла из scripts/\n- geo: `55.75 37.62`\n- model: строка модели устройства\n\nAPK кладёшь в корень репо — установится автоматически.\nСкрины/логи в артефактах после сессии.\n
