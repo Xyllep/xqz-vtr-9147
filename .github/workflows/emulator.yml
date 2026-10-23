@@ -83,6 +83,13 @@ jobs:
         timeout-minutes: 15
         run: |
           SDK=/usr/local/lib/android/sdk
+          AVD_DIR=$(dirname $(find $HOME -name config.ini -path "*pixel7pro*" 2>/dev/null | head -1))
+          echo "AVD_DIR=$AVD_DIR"
+          INI_SRC=$(find $HOME -name pixel7pro.ini 2>/dev/null | grep -v ".avd" | head -1)
+          mkdir -p $HOME/.android/avd
+          [ -n "$INI_SRC" ] && cp "$INI_SRC" $HOME/.android/avd/pixel7pro.ini
+          [ -f $HOME/.android/avd/pixel7pro.ini ] || echo "path=$AVD_DIR/pixel7pro.avd" > $HOME/.android/avd/pixel7pro.ini
+          sed -i "s|^path=.*|path=$AVD_DIR/pixel7pro.avd|" $HOME/.android/avd/pixel7pro.ini
           nohup $SDK/emulator/emulator -avd pixel7pro \
             -no-window -no-snapshot -no-boot-anim -no-metrics \
             -gpu swiftshader_indirect -accel on \
