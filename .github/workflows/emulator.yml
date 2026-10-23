@@ -121,7 +121,7 @@ jobs:
           grep -E "hw.cpu.arch|abi.type" $ANDROID_AVD_HOME/pixel7pro.avd/config.ini || echo "hw.cpu.arch = x86_64" >> $ANDROID_AVD_HOME/pixel7pro.avd/config.ini
           nohup $SDK/emulator/emulator -avd pixel7pro \
             -no-window -no-snapshot -no-boot-anim -no-metrics \
-            -gpu swiftshader_indirect -accel on \
+            -gpu swiftshader_indirect -accel on -feature -Vulkan \
             -writable-system -memory 3072 -cores 2 \
             -qemu -enable-kvm > emulator.log 2>&1 &
           ADB=$SDK/platform-tools/adb
