@@ -19,6 +19,7 @@ jobs:
     env:
       ANDROID_AVD_HOME: /home/runner/.android/avd
       ANDROID_USER_HOME: /home/runner/.android
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -173,12 +174,29 @@ jobs:
           sleep 2
           $ADB emu geo fix $LON $LAT
 
-      - name: Install APK (если есть)
+      - name: Install APKs (Yandex Maps из Release + любые из репо)
         run: |
           SDK=/usr/local/lib/android/sdk
-          for apk in $(ls *.apk 2>/dev/null); do
-            $SDK/platform-tools/adb install -r "$apk"
+          ADB=$SDK/platform-tools/adb
+          # качаем APK из релиза репы (кеш-URL: всегда последний ассет)
+          APK_URL=$(gh api repos/${{ github.repository }}/releases/tags/maps-apk -q '.assets[0].browser_download_url' 2>/dev/null || echo "")
+          if [ -n "$APK_URL" ]; then
+            echo "Downloading $APK_URL"
+            curl -sL "$APK_URL" -o /tmp/yandexmaps.apk --max-time 280
+            $ADB install -r /tmp/yandexmaps.apk || $ADB install -r -d -g /tmp/yandexmaps.apk
+          else
+            echo "Release maps-apk не найден"
+          fi
+          for apk in $(ls *.apk apks/*.apk 2>/dev/null); do
+            echo "Installing $apk"
+            $ADB install -r "$apk" || $ADB install -r -d -g "$apk"
           done
+          # запускаем Яндекс Карты, если установлены
+          PKG=$($ADB shell pm list packages | grep -o 'package:ru.yandex.yandexmaps' | cut -d: -f2 | tr -d '\r')
+          if [ -n "$PKG" ]; then
+            echo "Запускаю $PKG"
+            $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
+          fi
 
       - name: Run automation script
         if: ${{ github.event.inputs.script != '' }}
