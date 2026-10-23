@@ -194,8 +194,15 @@ jobs:
           # запускаем Яндекс Карты, если установлены
           PKG=$($ADB shell pm list packages | grep -o 'package:ru.yandex.yandexmaps' | cut -d: -f2 | tr -d '\r')
           if [ -n "$PKG" ]; then
-            echo "Запускаю $PKG"
+            echo "Разрешения + запуск $PKG"
+            $ADB shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION 2>/dev/null || true
+            $ADB shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION 2>/dev/null || true
+            $ADB shell pm grant $PKG android.permission.ACCESS_BACKGROUND_LOCATION 2>/dev/null || true
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
+            sleep 25
+            # прогнать возможные диалоги (onboarding/разрешения) тапом по правому нижнему углу и Enter
+            $ADB shell input keyevent KEYCODE_ENTER || true
+            sleep 5
           fi
 
       - name: Run automation script
@@ -210,17 +217,21 @@ jobs:
           ADB=$SDK/platform-tools/adb
           MIN=${{ github.event.inputs.session_minutes }}
           END=$((SECONDS + MIN*60))
-          # дождаться конца анимации загрузки
-          until [ "$($ADB shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')" = "stopped" ]; do sleep 5; done
-          sleep 5
-          # разбудить экран и снять keyguard
+          # разбудить экран, снять keyguard
           $ADB shell input keyevent KEYCODE_WAKEUP
           sleep 2
           $ADB shell wm dismiss-keyguard || true
           sleep 3
-          $ADB shell input keyevent KEYCODE_HOME || true
-          sleep 3
+          # запустить Карты на передний план и дать прогрузиться
+          PKG=ru.yandex.yandexmaps
+          if $ADB shell pm list packages | grep -q "$PKG"; then
+            $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
+            sleep 30
+            $ADB shell input tap 720 2980 || true
+            sleep 10
+          fi
           $ADB exec-out screencap -p > screenshot_boot.png
+          echo "screenshot taken: $(date)"
           $ADB shell getprop > props_dump.txt || true
           while [ $SECONDS -lt $END ]; do
             sleep 300
