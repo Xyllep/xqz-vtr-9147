@@ -126,8 +126,16 @@ jobs:
             -qemu -enable-kvm > emulator.log 2>&1 &
           ADB=$SDK/platform-tools/adb
           $ADB wait-for-device
-          until [ "$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 5; done
-          $ADB root && sleep 3 && $ADB remount || true
+          for a in $(seq 1 60); do
+            B="$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            [ "$B" = "1" ] && break
+            sleep 5
+          done
+          for a in 1 2 3 4 5; do
+            $ADB root && break
+            sleep 10
+          done
+          sleep 3 && $ADB remount || true
           # Маскировка признаков эмулятора
           $ADB shell settings put global adb_enabled 1
           $ADB shell settings put global window_animation_scale 1.0
