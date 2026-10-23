@@ -22,6 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Android system image
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-33
+          key: sysimg-android-33-google_apis-x86_64-v1
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -29,16 +35,38 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           sudo chmod 666 /dev/kvm
 
+      - name: Cache AVD
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.android/avd
+          key: avd-pixel7pro-v1
+
       - name: Create realistic AVD (Pixel 7 Pro)
         run: |
           SDK=/usr/local/lib/android/sdk
           yes | $SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
           # ставим образ, если нет предустановленного
-          $SDK/cmdline-tools/latest/bin/sdkmanager --install "system-images;android-33;google_apis;x86_64" > /dev/null 2>&1 || true
-          ls $SDK/system-images/android-33/google_apis/x86_64/ > /dev/null 2>&1 || \
-            $SDK/cmdline-tools/latest/bin/sdkmanager --install "system-images;android-33;google_apis;x86_64"
-          echo "no" | $SDK/cmdline-tools/latest/bin/avdmanager create avd \
-            -n pixel7pro -k "system-images;android-33;google_apis;x86_64" -d pixel_7 --force
+          if [ ! -d $SDK/system-images/android-33/google_apis/x86_64 ]; then
+            $SDK/cmdline-tools/latest/bin/sdkmanager --install "system-images;android-33;google_apis;x86_64" > /dev/null 2>&1
+          else
+            echo "образ из кеша — пропускаю установку"
+          fi
+          if [ ! -d $ANDROID_AVD_HOME/pixel7pro.avd ]; then
+            echo "no" | $SDK/cmdline-tools/latest/bin/avdmanager create avd \
+              -n pixel7pro -k "system-images;android-33;google_apis;x86_64" -d pixel_7 --force
+            CFG=$(find $ANDROID_AVD_HOME -name config.ini -path "*pixel7pro*" | head -1)
+            for kv in "hw.lcd.density=560" "hw.lcd.width=1440" "hw.lcd.height=3120" \
+                      "hw.gps=yes" "hw.sensors.proximity=yes" "hw.sensors.light=yes" \
+                      "hw.battery=yes" "hw.battery.status=discharging" "hw.battery.level=87" \
+                      "hw.camera.back=virtualscene" "hw.wifi=yes" "hw.ramSize=6144" \
+                      "hw.cpu.arch=x86_64" "fastboot.forceColdBoot=no"; do
+              echo "$kv" | tr '=' ' ' | xargs -I{} true
+              echo "$(echo $kv | cut -d= -f1) = $(echo $kv | cut -d= -f2)" >> $CFG
+            done
+            sed -i 's/^hw.device.name=.*/hw.device.name = pixel_7_pro/' $CFG
+          else
+            echo "AVD из кеша"
+          fi
           mkdir -p $ANDROID_AVD_HOME
           CFG=$(find $HOME -name config.ini -path "*pixel7pro*" 2>/dev/null | head -1)
           echo "AVD config: $CFG"
