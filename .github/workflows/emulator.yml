@@ -3,17 +3,14 @@ on:
   workflow_dispatch:
     inputs:
       session_minutes:
-        description: "Длительность сессии (минут, макс 350)"
-        default: "120"
+        description: "Длительность сессии (минут)"
+        default: "60"
       script:
-        description: "Скрипт автоматизации в scripts/ для запуска (пусто = просто держать эмулятор)"
+        description: "Скрипт из scripts/ (пусто = просто держать)"
         default: ""
       geo:
-        description: "Гео: 'lat lon' (напр. 55.75 37.62)"
-        default: ""
-      model:
-        description: "Модель устройства для getprop (напр. Pixel 7 Pro)"
-        default: ""
+        description: "Гео lat lon"
+        default: "55.7539 37.6208"
 
 jobs:
   emulator:
@@ -24,54 +21,113 @@ jobs:
 
       - name: Enable KVM
         run: |
-          sudo -i
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           sudo chmod 666 /dev/kvm
 
-      - name: AVD info
+      - name: Create realistic AVD (Pixel 7 Pro)
         run: |
-          echo "CPU cores: $(nproc), RAM: $(free -g | awk '/Mem/{print $2}')G"
-          /usr/local/lib/android/sdk/emulator/emulator -version
-          /usr/local/lib/android/sdk/emulator/emulator -list-avds || true
+          SDK=/usr/local/lib/android/sdk
+          yes | $SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          echo "no" | $SDK/cmdline-tools/latest/bin/avdmanager create avd \
+            -n pixel7pro -k "system-images;android-33;google_apis;x86_64" -d pixel_7 --force
+          CFG=~/.android/avd/pixel7pro.avd/config.ini
+          cat >> $CFG <<'EOF'
+          hw.lcd.density = 560
+          hw.lcd.width = 1440
+          hw.lcd.height = 3120
+          hw.lcd.backlight = true
+          hw.mainKeys = false
+          hw.trackBall = false
+          hw.dPad = no
+          hw.gps = yes
+          hw.sensors.orientation = yes
+          hw.sensors.proximity = yes
+          hw.sensors.light = yes
+          hw.sensors.magnetic_field = yes
+          hw.sensors.pressure = yes
+          hw.sensors.humidity = yes
+          hw.sensors.temperature = yes
+          hw.battery = yes
+          hw.battery.status = discharging
+          hw.battery.level = 87
+          hw.audioInput = yes
+          hw.camera.back = virtualscene
+          hw.camera.front = emulated
+          hw.wifi = yes
+          hw.network.speed = full
+          hw.ramSize = 6144
+          disk.dataPartition.size = 32G
+          image.sysdir.1 = system-images/android-33/google_apis/x86_64/
+          tag.id = google_apis
+          hw.device.name = pixel_7_pro
+          hw.device.model = Pixel 7 Pro
+          avd.ini.displayname = Pixel 7 Pro
+          fastboot.forceColdBoot = no
+          EOF
+          sed -i 's/^image.sysdir.1 = .*//' $CFG
+          echo 'image.sysdir.1 = system-images/android-33/google_apis/x86_64/' >> $CFG
+          sed -i 's/^hw.device.name=.*/hw.device.name = pixel_7_pro/' $CFG
+          sed -i 's/^tag.id=.*/tag.id = google_apis/' $CFG
 
-      - name: Create AVD (custom model)
-        run: |
-          echo "no" | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/avdmanager create avd \
-            -n test -k "system-images;android-33;google_apis;x86_64" -d pixel_7_pro
-          # переопределяем модель устройства
-          AVDCFG=~/.android/avd/test.avd/config.ini
-          if [ -n "${{ github.event.inputs.model }}" ]; then
-            sed -i "s/^hw.device.name=.*/hw.device.name=pixel_7_pro/" $AVDCFG || true
-            echo "ro.product.model=${{ github.event.inputs.model }}" >> $AVDCFG
-            echo "hw.device.model=${{ github.event.inputs.model }}" >> $AVDCFG
-          fi
-          cat $AVDCFG
-
-      - name: Run emulator
+      - name: Boot emulator
         timeout-minutes: 15
         run: |
-          nohup /usr/local/lib/android/sdk/emulator/emulator -avd test \
-            -no-window -gpu swiftshader_indirect -no-snapshot -no-audio -no-boot-anim \
-            -accel on -memory 3072 -cores 2 > emulator.log 2>&1 &
-          /usr/local/lib/android/sdk/platform-tools/adb wait-for-device
-          echo "Ожидание полной загрузки..."
-          until [ "$(/usr/local/lib/android/sdk/platform-tools/adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 5; done
-          echo "Эмулятор загружен"
+          SDK=/usr/local/lib/android/sdk
+          nohup $SDK/emulator/emulator -avd pixel7pro \
+            -no-window -no-snapshot -no-boot-anim -no-metrics \
+            -gpu swiftshader_indirect -accel on \
+            -writable-system -memory 4096 -cores 3 \
+            -qemu -enable-kvm > emulator.log 2>&1 &
+          ADB=$SDK/platform-tools/adb
+          $ADB wait-for-device
+          until [ "$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; do sleep 5; done
+          $ADB root && sleep 3 && $ADB remount || true
+          # Маскировка признаков эмулятора
+          $ADB shell settings put global adb_enabled 1
+          $ADB shell settings put global window_animation_scale 1.0
+          $ADB shell settings put global transition_animation_scale 1.0
+          $ADB shell settings put global animator_duration_scale 1.0
+          echo "booted"
 
-      - name: Set geo
-        if: ${{ github.event.inputs.geo != '' }}
+      - name: Spoof device props (root)
         run: |
+          SDK=/usr/local/lib/android/sdk
+          ADB=$SDK/platform-tools/adb
+          $ADB root; sleep 2
+          # build.prop: реальный Pixel 7 Pro (Cheetah)
+          $ADB shell "su 0 sh -c '
+            mount -o remount,rw /system 2>/dev/null
+            B=/system/build.prop
+            sed -i s/^ro.product.model=.*/ro.product.model=Pixel\ 7\ Pro/ $B
+            sed -i s/^ro.product.brand=.*/ro.product.brand=google/ $B
+            sed -i s/^ro.product.device=.*/ro.product.device=cheetah/ $B
+            sed -i s/^ro.product.name=.*/ro.product.name=cheetah/ $B
+            sed -i s/^ro.product.manufacturer=.*/ro.product.manufacturer=Google/ $B
+            grep -q ro.product.model= $B || echo ro.product.model=Pixel\ 7\ Pro >> $B
+          '" 2>/dev/null || echo "remount not possible, skipping build.prop (props via setprop)"
+          $ADB shell setprop ro.product.model "Pixel 7 Pro" 2>/dev/null || true
+          $ADB shell setprop ro.kernel.qemu 0 2>/dev/null || true
+
+      - name: Set geo (Moscow)
+        run: |
+          SDK=/usr/local/lib/android/sdk
+          ADB=$SDK/platform-tools/adb
           LAT=$(echo "${{ github.event.inputs.geo }}" | awk '{print $1}')
           LON=$(echo "${{ github.event.inputs.geo }}" | awk '{print $2}')
-          /usr/local/lib/android/sdk/platform-tools/adb emu geo fix $LON $LAT
-          /usr/local/lib/android/sdk/platform-tools/adb shell pm grant android.permission.ACCESS_FINE_LOCATION com.google.android.apps.maps 2>/dev/null || true
+          $ADB emu geo fix $LON $LAT
+          $ADB emu geo nmea \$GPGGA,120000.000,$LAT,N,${LON}0,E,1,08,0.9,156.0,M,18.0,M,,*47 || true
+          # persist geo provider
+          $ADB shell settings put secure location_providers_allowed +gps,+network
+          sleep 2
+          $ADB emu geo fix $LON $LAT
 
-      - name: Install APK (если есть в репо)
+      - name: Install APK (если есть)
         run: |
+          SDK=/usr/local/lib/android/sdk
           for apk in $(ls *.apk 2>/dev/null); do
-            /usr/local/lib/android/sdk/platform-tools/adb install -r "$apk"
+            $SDK/platform-tools/adb install -r "$apk"
           done
 
       - name: Run automation script
@@ -80,25 +136,26 @@ jobs:
           chmod +x scripts/${{ github.event.inputs.script }} || true
           scripts/${{ github.event.inputs.script }}
 
-      - name: Keep alive / watch
+      - name: Session loop
         run: |
+          SDK=/usr/local/lib/android/sdk
+          ADB=$SDK/platform-tools/adb
           MIN=${{ github.event.inputs.session_minutes }}
           END=$((SECONDS + MIN*60))
+          $ADB exec-out screencap -p > screenshot_boot.png
+          $ADB shell getprop > props_dump.txt || true
           while [ $SECONDS -lt $END ]; do
             sleep 300
-            echo "--- $(date) uptime check ---"
-            /usr/local/lib/android/sdk/platform-tools/adb shell getprop sys.boot_completed || true
-            /usr/local/lib/android/sdk/platform-tools/adb exec-out screencap -p > screen_$(date +%H%M).png || true
+            $ADB emu geo fix 37.6208 55.7539 || true
           done
 
-      - name: Collect logs
+      - name: Upload artifacts
         if: always()
-        run: |
-          /usr/local/lib/android/sdk/platform-tools/adb shell screencap -p screen_final.png || true
-          tar czf artifacts.tgz emulator.log *.png 2>/dev/null || tar czf artifacts.tgz emulator.log
-
-      - uses: actions/upload-artifact@v4
-        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: emulator-logs
-          path: artifacts.tgz
+          name: android-session
+          path: |
+            screenshot_boot.png
+            props_dump.txt
+            emulator.log
+          if-no-files-found: warn
