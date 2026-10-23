@@ -121,7 +121,7 @@ jobs:
           nohup $SDK/emulator/emulator -avd pixel7pro \
             -no-window -no-snapshot -no-boot-anim -no-metrics \
             -gpu swiftshader_indirect -accel on \
-            -writable-system -memory 4096 -cores 3 \
+            -writable-system -memory 2560 -cores 2 \
             -qemu -enable-kvm > emulator.log 2>&1 &
           ADB=$SDK/platform-tools/adb
           $ADB wait-for-device
@@ -226,18 +226,22 @@ jobs:
           PKG=ru.yandex.yandexmaps
           if $ADB shell pm list packages | grep -q "$PKG"; then
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            sleep 30
-            # онбординг: жмём Continue / пропускаем несколько экранов подряд
+            sleep 25
             for i in 1 2 3 4 5; do
-              $ADB shell input tap 720 2645 || true   # синяя кнопка Continue (низ центра)
-              sleep 4
-              $ADB shell input tap 720 2980 || true   # системный диалог "Allow"/"While using"
+              $ADB shell input tap 720 2645 || true
               sleep 3
+              $ADB shell input tap 720 2980 || true
+              sleep 2
             done
-            sleep 10
+            sleep 5
           fi
-          $ADB exec-out screencap -p > screenshot_maps.png
-          $ADB exec-out screencap -p > screenshot_boot.png
+          # скрин с ретраями (эмулятор может падать — фиксируем что успели)
+          for a in 1 2 3 4 5; do
+            $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null && break
+            sleep 5
+          done
+          $ADB exec-out screencap -p > screenshot_boot.png 2>/dev/null || true
+          ls -la screenshot*.png
           echo "screenshot taken: $(date)"
           $ADB shell getprop > props_dump.txt || true
           while [ $SECONDS -lt $END ]; do
