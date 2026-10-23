@@ -227,16 +227,23 @@ jobs:
           PKG=ru.yandex.yandexmaps
           if $ADB shell pm list packages | grep -q "$PKG"; then
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            sleep 12
-            for i in 1 2 3 4; do
+            # скрин КАК МОЖНО РАНЬШЕ, до краша гостя
+            for a in 1 2 3 4 5 6; do
+              sleep 5
+              $ADB exec-out screencap -p > shot_tmp.png 2>/dev/null || break
+              SZ=$(stat -c%s shot_tmp.png 2>/dev/null || echo 0)
+              if [ "$SZ" -gt 50000 ]; then cp shot_tmp.png screenshot_maps.png; break; fi
+            done
+            # онбординг-тапы если ещё жив
+            for i in 1 2 3; do
               $ADB shell input tap 720 2670 || true
               sleep 2
               $ADB shell input tap 720 2980 || true
               sleep 2
+              $ADB exec-out screencap -p > shot_tmp.png 2>/dev/null || break
+              SZ=$(stat -c%s shot_tmp.png 2>/dev/null || echo 0)
+              if [ "$SZ" -gt 50000 ]; then cp shot_tmp.png screenshot_maps.png; fi
             done
-            # ранний скрин пока апп жив (гость может отвалиться позже)
-            $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
-            sleep 3
           fi
           for a in 1 2 3; do
             $ADB exec-out screencap -p > screenshot_boot.png 2>/dev/null && break
