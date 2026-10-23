@@ -226,22 +226,22 @@ jobs:
           PKG=ru.yandex.yandexmaps
           if $ADB shell pm list packages | grep -q "$PKG"; then
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            sleep 25
-            for i in 1 2 3 4 5 6; do
+            sleep 12
+            for i in 1 2 3 4; do
               $ADB shell input tap 720 2670 || true
-              sleep 3
+              sleep 2
               $ADB shell input tap 720 2980 || true
               sleep 2
             done
-            sleep 5
+            # ранний скрин пока апп жив (гость может отвалиться позже)
+            $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
+            sleep 3
           fi
-          # скрин с ретраями (эмулятор может падать — фиксируем что успели)
-          for a in 1 2 3 4 5; do
-            $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null && break
+          for a in 1 2 3; do
+            $ADB exec-out screencap -p > screenshot_boot.png 2>/dev/null && break
             sleep 5
           done
-          $ADB exec-out screencap -p > screenshot_boot.png 2>/dev/null || true
-          ls -la screenshot*.png
+          ls -la screenshot*.png || true
           echo "screenshot taken: $(date)"
           $ADB shell getprop > props_dump.txt || true
           while [ $SECONDS -lt $END ]; do
