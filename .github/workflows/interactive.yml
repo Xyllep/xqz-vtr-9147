@@ -102,45 +102,24 @@ jobs:
 
       - name: Start ws-scrcpy (browser mirror)
         run: |
-          # ws-scrcpy: ставим в локальную папку, запуск через node index.js
-          mkdir -p /opt/wsscrcpy && cd /opt/wsscrcpy
-          npm init -y >/dev/null 2>&1
-          npm install ws-scrcpy@2.7.1 --no-audit --no-fund 2>&1 | tail -2
+          git clone --depth 1 https://github.com/NetrisTV/ws-scrcpy.git /opt/wsscrcpy
+          cd /opt/wsscrcpy
+          npm install --no-audit --no-fund 2>&1 | tail -2
+          npm run build 2>&1 | tail -3 || true
           export PATH=$SDK/platform-tools:$PATH
           $ADB start-server
-          # сервер на 0.0.0.0:8000
-          nohup node node_modules/ws-scrcpy/index.js --port 8000 --host 0.0.0.0 > /opt/wsscrcpy/ws.log 2>&1 &
-          # ждём реального ответа HTTP
+          sed -i 's/port: 8000/port: 8000/' serverConfig.yaml 2>/dev/null || true
+          nohup node index.js > ws.log 2>&1 &
           OK=0
-          for i in $(seq 1 30); do
+          for i in $(seq 1 45); do
             sleep 2
             CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000 || true)
             if [ "$CODE" = "200" ]; then OK=1; echo "ws-scrcpy UP after $((i*2))s"; break; fi
           done
           if [ "$OK" != "1" ]; then
-            echo "ws-scrcpy FAILED to start:"; tail -30 /opt/wsscrcpy/ws.log; exit 1
+            echo "ws-scrcpy FAILED to start:"; tail -30 ws.log; exit 1
           fi
 
-      - name: Cloudflare tunnel
-        run: |
-          curl -sL -o cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x cf
-          nohup ./cf tunnel --url http://localhost:8000 --no-autoupdate > cf.log 2>&1 &
-          sleep 12
-          # вытащить публичный URL
-          URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cf.log | head -1)
-          echo "TUNNEL_URL=$URL"
-          echo "$URL" > tunnel_url.txt
-          if [ -n "$URL" ]; then
-            echo "$URL" >> $GITHUB_STEP_SUMMARY
-            RESP=$(curl -s "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" --data-urlencode "chat_id=${{ secrets.TG_CHAT_ID }}" --data-urlencode "text=🎮 Android готов: $URL (открой в браузере, выбери emulator-5554)" )
-            echo "TG RESP: $RESP"
-          else
-            cat cf.log | tail -20
-          fi
-          echo "TUNNEL_URL=$URL" >> $GITHUB_ENV
-          # немедленный артефакт с URL — можно скачать пока ран жив
-          echo "$URL" > tunnel_url_live.txt
       - name: Upload URL artifact (live)
         if: always()
         uses: actions/upload-artifact@v4
