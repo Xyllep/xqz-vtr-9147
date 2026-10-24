@@ -15,6 +15,7 @@ jobs:
       SDK: /usr/local/lib/android/sdk
       ADB: /usr/local/lib/android/sdk/platform-tools/adb
       ANDROID_AVD_HOME: ${{ github.workspace }}/.android/avd
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
 
