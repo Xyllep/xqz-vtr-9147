@@ -232,8 +232,16 @@ jobs:
               echo "after sign-in tap focus: $F3"
               if ! echo "$F3" | grep -qE "SplashScreen|pixel6a"; then break; fi
             done
-            sleep 3
-            $ADB exec-out screencap -p > screenshot_step_signin.png 2>/dev/null || true
+            # ждём отрисовку формы: сплэш Я отдаёт большой PNG; ждём пока экран перестанет быть однотонным
+            sleep 5
+            for i in $(seq 1 20); do
+              SZ=$(stat -c%s screenshot_step_signin.png 2>/dev/null || echo 0)
+              $ADB exec-out screencap -p > screenshot_step_signin.tmp.png 2>/dev/null || true
+              SZ2=$(stat -c%s screenshot_step_signin.tmp.png 2>/dev/null || echo 0)
+              # форма с полями весит заметно больше однотонного сплэша; 2 замера подряд совпали = отрисовалось
+              if [ "$SZ2" -gt 200000 ]; then mv screenshot_step_signin.tmp.png screenshot_step_signin.png; break; fi
+              sleep 3
+            done
             echo "signin screenshot: $(stat -c%s screenshot_step_signin.png 2>/dev/null || echo 0)"
             # сохраняем снапшот — следующий запуск поднимется из этого состояния за ~20с
             $ADB emu snapshot save maps_ready 2>/dev/null || true
