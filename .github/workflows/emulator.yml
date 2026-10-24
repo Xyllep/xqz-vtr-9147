@@ -208,13 +208,12 @@ jobs:
             $ADB shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION 2>/dev/null || true
             $ADB shell pm grant $PKG android.permission.ACCESS_BACKGROUND_LOCATION 2>/dev/null || true
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            sleep 15
-            $ADB exec-out screencap -p > screenshot_maps1.png 2>/dev/null || true
-            sleep 25
+            sleep 10
             $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
-            sleep 5
-            $ADB exec-out screencap -p > screenshot_maps3.png 2>/dev/null || true
-            echo "shots: $(stat -c%s screenshot_maps1.png 2>/dev/null || echo 0) $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0) $(stat -c%s screenshot_maps3.png 2>/dev/null || echo 0)"
+            echo "shot10: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
+            sleep 8
+            $ADB exec-out screencap -p > screenshot_maps2.png 2>/dev/null || true
+            echo "shot18: $(stat -c%s screenshot_maps2.png 2>/dev/null || echo 0)"
           fi
 
       - name: Run automation script
