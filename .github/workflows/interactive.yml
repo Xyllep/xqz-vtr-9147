@@ -193,6 +193,12 @@ jobs:
             if [ $((SECONDS % 600)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
               $ADB emu snapshot save autostate 2>/dev/null && echo "snapshot saved at ${SECONDS}s" || echo "snapshot save failed"
             fi
+            # каждые 30 мин заливаем AVD в Release (переживёт ран)
+            if [ $((SECONDS % 1800)) -lt 60 ] && [ "$SECONDS" -gt 600 ]; then
+              gh release create avd-snap --repo Xyllep/gha-android --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
+              cd "$ANDROID_AVD_HOME/.." && tar czf /tmp/avd-live.tar.gz avd && cd -
+              gh release upload avd-snap /tmp/avd-live.tar.gz --repo Xyllep/gha-android --clobber && echo "AVD uploaded at ${SECONDS}s"
+            fi
             # health: туннель жив?
             if ! grep -q "trycloudflare" cf.log 2>/dev/null; then echo "tunnel log missing"; fi
             ALIVE=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
