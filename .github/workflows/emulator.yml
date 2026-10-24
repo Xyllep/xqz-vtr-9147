@@ -167,13 +167,45 @@ jobs:
             $ADB shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION 2>/dev/null || true
             $ADB shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION 2>/dev/null || true
             $ADB shell pm grant $PKG android.permission.ACCESS_BACKGROUND_LOCATION 2>/dev/null || true
+            # запускаем logcat в фон — поймаем событие "Displayed" и краши
+            $ADB logcat -c || true
+            ($ADB logcat > logcat_dump.txt 2>&1 &) || true
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            sleep 10
+            # === СОБЫТИЙНАЯ ЛОГИКА (без таймеров) ===
+            # Ждём пока: 1) процесс жив 2) окно приложения в фокусе 3) Android отрисовал окно (Displayed в logcat)
+            for i in $(seq 1 60); do
+              ALIVE=$($ADB shell pidof $PKG 2>/dev/null | tr -d '\r')
+              FOCUS=$($ADB shell dumpsys window 2>/dev/null | grep mCurrentFocus | tr -d '\r')
+              if [ -n "$ALIVE" ] && echo "$FOCUS" | grep -q "$PKG"; then
+                echo "[$i] process alive (pid $ALIVE), focus: $FOCUS"
+                # окно в фокусе — ждём событие Displayed (не более 15 итераций)
+                for j in $(seq 1 15); do
+                  if grep -q "Displayed.*$PKG" logcat_dump.txt 2>/dev/null; then
+                    echo "[$i/$j] Displayed event caught!"
+                    break 2
+                  fi
+                  # процесс умер во время ожидания?
+                  ALIVE2=$($ADB shell pidof $PKG 2>/dev/null | tr -d '\r')
+                  [ -z "$ALIVE2" ] && { echo "[$i/$j] PROCESS DIED waiting for Displayed"; break 2; }
+                  sleep 2
+                done
+                break
+              fi
+              echo "[$i] waiting: alive='$ALIVE' focus='$FOCUS'"
+              sleep 2
+            done
+            # состояние на момент скрина
+            echo "=== state at screenshot ==="
+            $ADB shell dumpsys window | grep mCurrentFocus || true
+            $ADB shell dumpsys activity activities | grep mResumedActivity || true
+            echo "=== screen ==="
             $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
-            echo "shot10: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
+            echo "maps screenshot: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
+            # лёгкий прогрев: тап в центр (снять возможный оверлей/диалог), ещё один скрин через 8с если жив
+            $ADB shell input tap 540 1200 2>/dev/null || true
             sleep 8
             $ADB exec-out screencap -p > screenshot_maps2.png 2>/dev/null || true
-            echo "shot18: $(stat -c%s screenshot_maps2.png 2>/dev/null || echo 0)"
+            echo "maps screenshot2: $(stat -c%s screenshot_maps2.png 2>/dev/null || echo 0)"
           fi
 
       - name: Run automation script
@@ -236,5 +268,6 @@ jobs:
             screenshot_maps*.png
             screenshot_boot.png
             props_dump.txt
+            logcat_dump.txt
             emulator.log
           if-no-files-found: warn
