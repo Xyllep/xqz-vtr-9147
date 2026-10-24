@@ -1,0 +1,154 @@
+name: Interactive Android (browser control)
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: "Длительность сессии (минут, макс 350)"
+        default: "60"
+
+jobs:
+  interactive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      SDK: /usr/local/lib/android/sdk
+      ADB: /usr/local/lib/android/sdk/platform-tools/adb
+      ANDROID_AVD_HOME: ${{ github.workspace }}/.android/avd
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo adduser $USER kvm
+
+      - name: Cache Android system image
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/system-images/android-30
+          key: sysimg-android-30-google_apis-x86_64-v1
+
+      - name: Install system image + emulator
+        run: |
+          yes | $SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $SDK/cmdline-tools/latest/bin/sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64" > /dev/null
+
+      - name: Create AVD (Pixel 6a, 1080x2400@420)
+        run: |
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-30;google_apis;x86_64" -d pixel_6a --force
+          CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
+          cat >> "$CFG" <<EOF
+          hw.lcd.width=1080
+          hw.lcd.height=2400
+          hw.lcd.density=420
+          hw.ramSize=6144
+          hw.cpu.ncore=2
+          disk.dataPartition.size=8G
+          EOF
+
+      - name: Boot emulator
+        run: |
+          sudo sysctl vm.overcommit_memory=1 || true
+          nohup $SDK/emulator/emulator -avd pixel6a \
+            -no-window -no-boot-anim -no-metrics -no-audio \
+            -gpu swiftshader_indirect -accel on \
+            -camera-back emulated -camera-front emulated \
+            > emulator.log 2>&1 &
+          for i in $(seq 1 90); do
+            sleep 5
+            BOOT=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            if [ "$BOOT" = "1" ]; then echo "BOOT OK at $((i*5))s"; break; fi
+          done
+          $ADB shell getprop sys.boot_completed
+          $ADB wait-for-device
+          sleep 5
+          $ADB shell input keyevent 82 || true
+          $ADB shell wm dismiss-keyguard || true
+
+      - name: Spoof device props (Pixel 6a, Moscow)
+        run: |
+          $ADB root || true; sleep 3
+          $ADB remount || true; sleep 2
+          for f in /system/build.prop /vendor/build.prop; do
+            $ADB shell "su 0 sed -i 's/^ro.product.model=.*/ro.product.model=Pixel 6a/; s/^ro.product.brand=.*/ro.product.brand=google/; s/^ro.product.device=.*/ro.product.device=bluejay/; s/^ro.product.name=.*/ro.product.name=bluejay/' $f" 2>/dev/null || true
+          done
+          $ADB shell "su 0 setprop persist.sys.timezone Europe/Moscow" || true
+          $ADB shell "settings put system time_zone Europe/Moscow" || true
+          $ADB shell "setprop persist.sys.locale ru-RU" 2>/dev/null || true
+          $ADB emu geo fix 37.6173 55.7558 || true
+          sleep 2
+
+      - name: Install Yandex Maps + Yandex app
+        run: |
+          mkdir -p /tmp/apks && cd /tmp/apks
+          URL=$(gh api repos/Xyllep/gha-android/releases/tags/maps-apk -q '.assets[0].url')
+          curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "$URL" -o maps.apk
+          $ADB install -r -g maps.apk
+          # Yandex app (3 сплита)
+          mkdir -p /tmp/ya && cd /tmp/ya
+          for A in yandex_base.apk config.ru.apk config.xhdpi.apk; do
+            U=$(gh api repos/Xyllep/gha-android/releases/tags/yandex-app -q ".assets[] | select(.name==\"$A\") | .url")
+            curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "$U" -o "$A"
+          done
+          $ADB install-multiple -r yandex_base.apk config.ru.apk config.xhdpi.apk || echo "yandex install failed"
+
+      - name: Start ws-scrcpy (browser mirror)
+        run: |
+          # node уже стоит на раннере
+          sudo npm install -g ws-scrcpy@2.7.1 2>/dev/null | tail -1 || npm install -g ws-scrcpy 2>&1 | tail -2
+          # ws-scrcpy использует adb из PATH — укажем
+          export PATH=$SDK/platform-tools:$PATH
+          adb start-server || true
+          nohup ws-scrcpy --port 8000 > ws-scrcpy.log 2>&1 &
+          sleep 8
+          curl -s -o /dev/null -w "ws-scrcpy http status: %{http_code}\n" http://localhost:8000 || true
+
+      - name: Cloudflare tunnel
+        run: |
+          curl -sL -o cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cf
+          nohup ./cf tunnel --url http://localhost:8000 --no-autoupdate > cf.log 2>&1 &
+          sleep 12
+          # вытащить публичный URL
+          URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cf.log | head -1)
+          echo "TUNNEL_URL=$URL"
+          echo "$URL" > tunnel_url.txt
+          if [ -n "$URL" ]; then
+            curl -s "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" -d chat_id=${{ secrets.TG_CHAT_ID }} -d text="🎮 Android готов: $URL (открой в браузере телефона, выбери устройство и залезь в экран)" || true
+          else
+            cat cf.log | tail -20
+          fi
+          echo "TUNNEL_URL=$URL" >> $GITHUB_ENV
+
+      - name: Keep session alive
+        run: |
+          MIN=${{ github.event.inputs.session_minutes }}
+          if [ "$MIN" -gt 350 ]; then MIN=350; fi
+          echo "Session will run ${MIN} minutes. Ctrl-C not possible; sleep with status checks."
+          END=$((SECONDS + MIN*60))
+          while [ $SECONDS -lt $END ]; do
+            sleep 60
+            # health: туннель жив?
+            if ! grep -q "trycloudflare" cf.log 2>/dev/null; then echo "tunnel log missing"; fi
+            ALIVE=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            echo "tick: boot=$ALIVE elapsed=$((SECONDS/60))m"
+          done
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interactive-session
+          path: |
+            emulator.log
+            ws-scrcpy.log
+            cf.log
+            tunnel_url.txt
+          if-no-files-found: ignore
