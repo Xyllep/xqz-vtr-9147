@@ -208,8 +208,8 @@ jobs:
             $ADB shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION 2>/dev/null || true
             $ADB shell pm grant $PKG android.permission.ACCESS_BACKGROUND_LOCATION 2>/dev/null || true
             $ADB shell monkey -p $PKG -c android.intent.category.LAUNCHER 1
-            sleep 6
-            for a in 1 2 3 4 5 6 7 8; do
+            sleep 35
+            for a in 1 2 3 4; do
               $ADB exec-out screencap -p > shot_tmp.png 2>/dev/null || break
               SZ=$(stat -c%s shot_tmp.png 2>/dev/null || echo 0)
               if [ "$SZ" -gt 100000 ]; then
@@ -217,7 +217,7 @@ jobs:
                 echo "got screenshot at attempt $a, size $SZ"
                 break
               fi
-              sleep 4
+              sleep 2
             done
             echo "maps screenshot: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
           fi
