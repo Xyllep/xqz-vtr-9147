@@ -201,11 +201,27 @@ jobs:
             echo "=== screen ==="
             $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
             echo "maps screenshot: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
-            # лёгкий прогрев: тап в центр (снять возможный оверлей/диалог), ещё один скрин через 8с если жив
-            $ADB shell input tap 540 1200 2>/dev/null || true
-            sleep 8
+            # ждём прогрузки тайлов карты (проверяем gfxinfo: если рисует кадры — карта живая)
+            for t in $(seq 1 20); do
+              sleep 3
+              FR=$($ADB shell dumpsys gfxinfo $PKG 2>/dev/null | grep -c 'Janky frames' || true)
+              [ -n "$FR" ] && break
+            done
             $ADB exec-out screencap -p > screenshot_maps2.png 2>/dev/null || true
-            echo "maps screenshot2: $(stat -c%s screenshot_maps2.png 2>/dev/null || echo 0)"
+            echo "maps screenshot2 (map loaded): $(stat -c%s screenshot_maps2.png 2>/dev/null || echo 0)"
+            # === ШАГ: тап по кнопке меню (☰) в левом верхнем углу ===
+            $ADB shell input tap 60 95 || true
+            sleep 4
+            # ждём открытия нового окна (фокус сменился)
+            for i in $(seq 1 15); do
+              FOCUS2=$($ADB shell dumpsys window 2>/dev/null | grep mCurrentFocus | tr -d '\r')
+              echo "after menu tap focus: $FOCUS2"
+              # скриним когда фокус не SplashScreen и не карта (открылось меню/окно)
+              if ! echo "$FOCUS2" | grep -q "SplashScreen"; then break; fi
+              sleep 2
+            done
+            $ADB exec-out screencap -p > screenshot_step_menu.png 2>/dev/null || true
+            echo "menu screenshot: $(stat -c%s screenshot_step_menu.png 2>/dev/null || echo 0)"
           fi
 
       - name: Run automation script
@@ -266,6 +282,7 @@ jobs:
           name: android-session
           path: |
             screenshot_maps*.png
+            screenshot_step_*.png
             screenshot_boot.png
             props_dump.txt
             logcat_dump.txt
