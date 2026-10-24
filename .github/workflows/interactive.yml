@@ -129,6 +129,15 @@ jobs:
             cat cf.log | tail -20
           fi
           echo "TUNNEL_URL=$URL" >> $GITHUB_ENV
+          # немедленный артефакт с URL — можно скачать пока ран жив
+          echo "$URL" > tunnel_url_live.txt
+      - name: Upload URL artifact (live)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnel-url
+          path: tunnel_url_live.txt
+          if-no-files-found: ignore
 
       - name: Keep session alive
         run: |
