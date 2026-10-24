@@ -223,6 +223,18 @@ jobs:
             done
             $ADB exec-out screencap -p > screenshot_step_menu.png 2>/dev/null || true
             echo "menu screenshot: $(stat -c%s screenshot_step_menu.png 2>/dev/null || echo 0)"
+            # === ШАГ 2: тап по синей кнопке Sign in (верх меню) ===
+            $ADB shell input tap 124 410 || true
+            # ждём смены окна (откроется логин/браузер)
+            for i in $(seq 1 20); do
+              sleep 2
+              F3=$($ADB shell dumpsys window 2>/dev/null | grep mCurrentFocus | tr -d '\r')
+              echo "after sign-in tap focus: $F3"
+              if ! echo "$F3" | grep -qE "SplashScreen|pixel6a"; then break; fi
+            done
+            sleep 3
+            $ADB exec-out screencap -p > screenshot_step_signin.png 2>/dev/null || true
+            echo "signin screenshot: $(stat -c%s screenshot_step_signin.png 2>/dev/null || echo 0)"
             # сохраняем снапшот — следующий запуск поднимется из этого состояния за ~20с
             $ADB emu snapshot save maps_ready 2>/dev/null || true
             echo "snapshot saved"
