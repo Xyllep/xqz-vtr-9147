@@ -243,6 +243,29 @@ jobs:
               sleep 3
             done
             echo "signin screenshot: $(stat -c%s screenshot_step_signin.png 2>/dev/null || echo 0)"
+            # === ШАГ 3: вводим логин и переходим к QR ===
+            sleep 2
+            # тап по полю ввода (Email tab активна, поле по центру формы)
+            $ADB shell input tap 540 780
+            sleep 2
+            $ADB shell input text "raisasharapova95sharapova"
+            sleep 1
+            # скрыть клавиатуру
+            $ADB shell input keyevent 111
+            sleep 1
+            # тап Next
+            $ADB shell input tap 540 990
+            # ждём следующий экран (варианты входа с QR)
+            sleep 6
+            for i in $(seq 1 15); do
+              F4=$($ADB shell dumpsys window 2>/dev/null | grep mCurrentFocus | tr -d '\r')
+              echo "after login submit focus: $F4"
+              $ADB exec-out screencap -p > screenshot_step_login2.png 2>/dev/null || true
+              SZ3=$(stat -c%s screenshot_step_login2.png 2>/dev/null || echo 0)
+              [ "$SZ3" -gt 250000 ] && break
+              sleep 3
+            done
+            echo "login2 screenshot: $(stat -c%s screenshot_step_login2.png 2>/dev/null || echo 0)"
             # сохраняем снапшот — следующий запуск поднимется из этого состояния за ~20с
             $ADB emu snapshot save maps_ready 2>/dev/null || true
             echo "snapshot saved"
