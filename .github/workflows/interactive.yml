@@ -104,11 +104,11 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/NetrisTV/ws-scrcpy.git /opt/wsscrcpy
           cd /opt/wsscrcpy
-          npm install --no-audit --no-fund 2>&1 | tail -2
-          npm run build 2>&1 | tail -3 || true
+          npm install --no-audit --no-fund 2>&1 | tail -1
+          npm run dist 2>&1 | tail -2
           export PATH=$SDK/platform-tools:$PATH
           $ADB start-server
-          sed -i 's/port: 8000/port: 8000/' serverConfig.yaml 2>/dev/null || true
+          cd dist
           nohup node index.js > ws.log 2>&1 &
           OK=0
           for i in $(seq 1 45); do
