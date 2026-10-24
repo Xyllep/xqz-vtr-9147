@@ -6,6 +6,13 @@ on:
       session_minutes:
         description: "Длительность сессии (минут, макс 350)"
         default: "60"
+      action:
+        description: "run = интерактивная сессия; snapshot = сохранить состояние AVD в Release"
+        default: "run"
+        type: choice
+        options:
+          - run
+          - snapshot
 
 jobs:
   interactive:
@@ -47,7 +54,21 @@ jobs:
           key: avd-pixel6a-snap-v1
           restore-keys: avd-pixel6a-snap
 
+      - name: Restore AVD snapshot from Release
+        run: |
+          # если в Release есть снапшот — разворачиваем вместо создания нового AVD
+          if gh release view avd-snap --repo Xyllep/gha-android >/dev/null 2>&1; then
+            curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" \
+              "$(gh api repos/Xyllep/gha-android/releases/tags/avd-snap -q '.assets[0].url')" -o /tmp/avd.tar.gz
+            mkdir -p "$ANDROID_AVD_HOME/.."
+            tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.."
+            ls "$ANDROID_AVD_HOME"
+            echo "restored snapshot AVD"
+            echo "restored=yes" >> $GITHUB_ENV
+          fi
+
       - name: Create AVD (Pixel 6a, 1080x2400@420)
+        if: env.restored != 'yes'
         run: |
           mkdir -p "$ANDROID_AVD_HOME"
           echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-30;google_apis;x86_64" -d pixel_6a --force
@@ -62,6 +83,7 @@ jobs:
           EOF
 
       - name: Boot emulator
+        if: github.event.inputs.action == 'run'
         run: |
           sudo sysctl vm.overcommit_memory=1 || true
           nohup $SDK/emulator/emulator -avd pixel6a \
@@ -81,6 +103,7 @@ jobs:
           $ADB shell wm dismiss-keyguard || true
 
       - name: Spoof device props (Pixel 6a, Moscow)
+        if: github.event.inputs.action == 'run'
         run: |
           $ADB root || true; sleep 3
           $ADB remount || true; sleep 2
@@ -94,6 +117,7 @@ jobs:
           sleep 2
 
       - name: Install Yandex Maps + Yandex app
+        if: github.event.inputs.action == 'run'
         run: |
           mkdir -p /tmp/apks && cd /tmp/apks
           URL=$(gh api repos/Xyllep/gha-android/releases/tags/maps-apk -q '.assets[0].url')
@@ -108,6 +132,7 @@ jobs:
           $ADB install-multiple -r yandex_base.apk config.ru.apk config.xhdpi.apk || echo "yandex install failed"
 
       - name: Start ws-scrcpy (browser mirror)
+        if: github.event.inputs.action == 'run'
         run: |
           git clone --depth 1 https://github.com/NetrisTV/ws-scrcpy.git /opt/wsscrcpy
           cd /opt/wsscrcpy
@@ -128,6 +153,7 @@ jobs:
           fi
 
       - name: Cloudflare tunnel
+        if: github.event.inputs.action == 'run'
         run: |
           curl -sL -o cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cf
@@ -146,6 +172,7 @@ jobs:
           echo "TG RESP: $RESP"
 
       - name: Upload URL artifact (live)
+        if: github.event.inputs.action == 'run'
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -154,6 +181,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Keep session alive
+        if: github.event.inputs.action == 'run'
         run: |
           MIN=${{ github.event.inputs.session_minutes }}
           if [ "$MIN" -gt 350 ]; then MIN=350; fi
@@ -170,6 +198,28 @@ jobs:
             ALIVE=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             echo "tick: boot=$ALIVE elapsed=$((SECONDS/60))m"
           done
+
+      - name: Save AVD snapshot to Release
+        if: github.event.inputs.action == 'snapshot'
+        run: |
+          # boot emulator briefly to write a clean snapshot of current AVD state
+          nohup $SDK/emulator/emulator -avd pixel6a -no-window -no-boot-anim -no-metrics -no-audio -gpu swiftshader_indirect -accel on > snap_boot.log 2>&1 &
+          for i in $(seq 1 60); do
+            sleep 5
+            B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            [ "$B" = "1" ] && break
+          done
+          $ADB emu snapshot save autostate || true
+          sleep 10
+          $ADB emu kill || true
+          sleep 15
+          # упаковываем AVD со снапшотами
+          cd "$ANDROID_AVD_HOME/.."
+          tar czf /tmp/avd-snapshot.tar.gz avd
+          ls -la /tmp/avd-snapshot.tar.gz
+          gh release create avd-snap --repo Xyllep/gha-android --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
+          gh release upload avd-snap /tmp/avd-snapshot.tar.gz --repo Xyllep/gha-android --clobber
+          echo "uploaded"
 
       - name: Upload logs
         if: always()
