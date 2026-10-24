@@ -120,6 +120,24 @@ jobs:
             echo "ws-scrcpy FAILED to start:"; tail -30 ws.log; exit 1
           fi
 
+      - name: Cloudflare tunnel
+        run: |
+          curl -sL -o cf https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cf
+          nohup ./cf tunnel --url http://localhost:8000 --no-autoupdate > cf.log 2>&1 &
+          OK=0
+          for i in $(seq 1 30); do
+            sleep 2
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cf.log | head -1)
+            if [ -n "$URL" ]; then OK=1; break; fi
+          done
+          echo "TUNNEL_URL=$URL"
+          echo "$URL" > tunnel_url_live.txt
+          if [ "$OK" != "1" ]; then echo "tunnel failed:"; tail -20 cf.log; exit 1; fi
+          echo "$URL" >> $GITHUB_STEP_SUMMARY
+          RESP=$(curl -s "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" --data-urlencode "chat_id=${{ secrets.TG_CHAT_ID }}" --data-urlencode "text=🎮 Android готов: $URL (открой в браузере, выбери emulator-5554)")
+          echo "TG RESP: $RESP"
+
       - name: Upload URL artifact (live)
         if: always()
         uses: actions/upload-artifact@v4
