@@ -40,6 +40,13 @@ jobs:
           yes | $SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
           $SDK/cmdline-tools/latest/bin/sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64" > /dev/null
 
+      - name: Cache AVD (with snapshots)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.android/avd
+          key: avd-pixel6a-snap-v1
+          restore-keys: avd-pixel6a-snap
+
       - name: Create AVD (Pixel 6a, 1080x2400@420)
         run: |
           mkdir -p "$ANDROID_AVD_HOME"
@@ -154,6 +161,10 @@ jobs:
           END=$((SECONDS + MIN*60))
           while [ $SECONDS -lt $END ]; do
             sleep 60
+            # каждые 10 мин сохраняем снапшот живого состояния (логин, сессии)
+            if [ $((SECONDS % 600)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
+              $ADB emu snapshot save autostate 2>/dev/null && echo "snapshot saved at ${SECONDS}s" || echo "snapshot save failed"
+            fi
             # health: туннель жив?
             if ! grep -q "trycloudflare" cf.log 2>/dev/null; then echo "tunnel log missing"; fi
             ALIVE=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
