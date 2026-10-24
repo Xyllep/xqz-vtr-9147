@@ -201,22 +201,13 @@ jobs:
             echo "=== screen ==="
             $ADB exec-out screencap -p > screenshot_maps.png 2>/dev/null || true
             echo "maps screenshot: $(stat -c%s screenshot_maps.png 2>/dev/null || echo 0)"
-            # ждём прогрузки карты: стимулируем тапами (сбрасывают idle), ждём сетевую активность приложения
-            for t in $(seq 1 30); do
-              sleep 4
-              # лёгкий тап в центр карты каждые 20с — стимул перерисоваться/дотянуть тайлы
-              if [ $((t % 5)) -eq 0 ]; then $ADB shell input tap 540 1200 2>/dev/null || true; fi
-              # проверяем активную сеть от приложения
-              NET=$($ADB shell dumpsys netstats detail 2>/dev/null | grep -A2 $PKG | head -2 || true)
-              RX1=$($ADB shell cat /proc/net/dev 2>/dev/null | grep -m1 wlan0 | awk '{print $2}')
-              sleep 2
-              RX2=$($ADB shell cat /proc/net/dev 2>/dev/null | grep -m1 wlan0 | awk '{print $2}')
-              if [ -n "$RX1" ] && [ -n "$RX2" ] && [ "$RX2" -le "$RX1" ]; then
-                # сеть утихла — тайлы либо догрузились, либо не идут; ещё пара циклов и выходим
-                if [ $((t % 5)) -eq 0 ]; then echo "network idle at $((t*4))s rx=$RX2"; break; fi
-              fi
+            # ждём прогрузки карты: детект простоя рендера (тайлы не критичны)
+            for t in $(seq 1 15); do
+              sleep 6
+              FR=$($ADB shell dumpsys gfxinfo $PKG 2>/dev/null | grep 'Total frames rendered' | grep -oE '[0-9]+' | head -1)
+              FR2=$($ADB shell dumpsys gfxinfo $PKG 2>/dev/null | grep 'Total frames rendered' | grep -oE '[0-9]+' | head -1)
+              [ -n "$FR" ] && [ "$FR" = "$FR2" ] && { echo "render idle at $((t*6))s"; break; }
             done
-            echo "tile wait done at ~$((t*4))s"
             $ADB exec-out screencap -p > screenshot_maps2.png 2>/dev/null || true
             echo "maps screenshot2 (map loaded): $(stat -c%s screenshot_maps2.png 2>/dev/null || echo 0)"
             # === ШАГ: тап по кнопке меню (☰) в левом верхнем углу ===
