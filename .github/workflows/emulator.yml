@@ -279,6 +279,7 @@ jobs:
         with:
           name: android-session
           path: |
+            screenshot_maps*.png
             screenshot_boot.png
             props_dump.txt
             emulator.log
