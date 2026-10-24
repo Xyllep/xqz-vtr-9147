@@ -274,6 +274,26 @@ jobs:
               sleep 3
             done
             echo "login2 screenshot: $(stat -c%s screenshot_step_login2.png 2>/dev/null || echo 0)"
+            # === ШАГ 4: вход через приложение Яндекс ===
+            # установка приложения Яндекс из Release
+            mkdir -p /tmp/yaapk && cd /tmp/yaapk
+            for A in yandex_base.apk config.ru.apk config.xhdpi.apk; do
+              URL=$(gh api repos/Xyllep/gha-android/releases/tags/yandex-app -q ".assets[] | select(.name==\"$A\") | .url")
+              curl -sL -H "Authorization: token $GH_TOKEN" -H "Accept: application/octet-stream" "$URL" -o "$A"
+            done
+            ls -la *.apk
+            $ADB install-multiple -r yandex_base.apk config.ru.apk config.xhdpi.apk || echo "yandex install failed"
+            cd - >/dev/null
+            # запуск приложения Яндекс
+            $ADB shell monkey -p com.yandex.searchapp.beta -c android.intent.category.LAUNCHER 1 2>/dev/null || true
+            # ждём отрисовку (скрин вырастет)
+            for i in $(seq 1 20); do
+              sleep 3
+              $ADB exec-out screencap -p > screenshot_yandex_app.png 2>/dev/null || true
+              SZ=$(stat -c%s screenshot_yandex_app.png 2>/dev/null || echo 0)
+              [ "$SZ" -gt 150000 ] && break
+            done
+            echo "yandex app screenshot: $(stat -c%s screenshot_yandex_app.png 2>/dev/null || echo 0)"
             # сохраняем снапшот — следующий запуск поднимется из этого состояния за ~20с
             $ADB emu snapshot save maps_ready 2>/dev/null || true
             echo "snapshot saved"
@@ -340,6 +360,7 @@ jobs:
           path: |
             screenshot_maps*.png
             screenshot_step_*.png
+            screenshot_yandex_app.png
             screenshot_boot.png
             props_dump.txt
             logcat_dump.txt
