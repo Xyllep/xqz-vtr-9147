@@ -245,16 +245,24 @@ jobs:
             echo "signin screenshot: $(stat -c%s screenshot_step_signin.png 2>/dev/null || echo 0)"
             # === ШАГ 3: вводим логин и переходим к QR ===
             sleep 2
-            # тап по полю ввода (Email tab активна, поле по центру формы)
-            $ADB shell input tap 540 780
+            # тап по полю ввода "Username or email" (y~690)
+            $ADB shell input tap 540 690
             sleep 2
             $ADB shell input text "raisasharapova95sharapova"
-            sleep 1
-            # скрыть клавиатуру
-            $ADB shell input keyevent 111
-            sleep 1
-            # тап Next
-            $ADB shell input tap 540 990
+            sleep 2
+            # проверка: текст в поле?
+            $ADB exec-out screencap -p > /tmp/check_field.png 2>/dev/null || true
+            # отправка через Enter (клавиатура открыта)
+            $ADB shell input keyevent 66
+            sleep 2
+            # если экран не сменился — тап по Next (y~1065)
+            F5=$($ADB shell dumpsys window 2>/dev/null | grep mCurrentFocus | tr -d '\r')
+            echo "after enter focus: $F5"
+            if echo "$F5" | grep -q "BouncerActivity"; then
+              $ADB shell input keyevent 111
+              sleep 1
+              $ADB shell input tap 540 1065
+            fi
             # ждём следующий экран (варианты входа с QR)
             sleep 6
             for i in $(seq 1 15); do
