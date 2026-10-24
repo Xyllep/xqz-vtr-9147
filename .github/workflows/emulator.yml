@@ -60,7 +60,7 @@ jobs:
             for kv in "hw.lcd.density=420" "hw.lcd.width=1080" "hw.lcd.height=2400" \
                       "hw.gps=yes" "hw.sensors.proximity=yes" "hw.sensors.light=yes" \
                       "hw.battery=yes" "hw.battery.status=discharging" "hw.battery.level=87" \
-                      "hw.camera.back=virtualscene" "hw.wifi=yes" "hw.ramSize=2560" \
+                      "hw.camera.back=virtualscene" "hw.wifi=yes" "hw.ramSize=6144" \
                       "hw.cpu.arch=x86_64" "fastboot.forceColdBoot=no"; do
               echo "$kv" | tr '=' ' ' | xargs -I{} true
               echo "$(echo $kv | cut -d= -f1) = $(echo $kv | cut -d= -f2)" >> $CFG
@@ -82,7 +82,7 @@ jobs:
           nohup $SDK/emulator/emulator -avd pixel6a \
             -no-window -no-snapshot -no-boot-anim -no-metrics \
             -gpu swiftshader_indirect -accel on -feature -Vulkan \
-            -writable-system -memory 3072 -cores 2 \
+            -writable-system -memory 6144 -cores 2 \
             -qemu -enable-kvm > emulator.log 2>&1 &
           ADB=$SDK/platform-tools/adb
           $ADB wait-for-device
