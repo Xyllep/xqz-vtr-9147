@@ -24,7 +24,7 @@ jobs:
       ANDROID_AVD_HOME: ${{ github.workspace }}/.android/avd
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -172,8 +172,7 @@ jobs:
           echo "TG RESP: $RESP"
 
       - name: Upload URL artifact (live)
-        if: github.event.inputs.action == 'run'
-        if: always()
+        if: ${{ always() && github.event.inputs.action == 'run' }}
         uses: actions/upload-artifact@v4
         with:
           name: tunnel-url
