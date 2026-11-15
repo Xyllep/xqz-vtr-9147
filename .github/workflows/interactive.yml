@@ -62,6 +62,9 @@ jobs:
               "$(gh api repos/Xyllep/gha-android/releases/tags/avd-snap -q '.assets[0].url')" -o /tmp/avd.tar.gz
             mkdir -p "$ANDROID_AVD_HOME/.."
             tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.."
+            # принудительно понижаем разрешение у восстановленного AVD (быстрее стрим)
+            CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
+            [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$CFG"
             ls "$ANDROID_AVD_HOME"
             echo "restored snapshot AVD"
             echo "restored=yes" >> $GITHUB_ENV
@@ -74,11 +77,11 @@ jobs:
           echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-30;google_apis;x86_64" -d pixel_6a --force
           CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
           cat >> "$CFG" <<EOF
-          hw.lcd.width=1080
-          hw.lcd.height=2400
-          hw.lcd.density=420
-          hw.ramSize=6144
-          hw.cpu.ncore=2
+          hw.lcd.width=720
+          hw.lcd.height=1560
+          hw.lcd.density=280
+          hw.ramSize=4096
+          hw.cpu.ncore=4
           disk.dataPartition.size=8G
           EOF
 
@@ -89,6 +92,8 @@ jobs:
           nohup $SDK/emulator/emulator -avd pixel6a \
             -no-window -no-boot-anim -no-metrics -no-audio \
             -gpu swiftshader_indirect -accel on \
+            -feature -Vulkan \
+            -memory 4096 -cores 4 \
             -camera-back emulated -camera-front emulated \
             > emulator.log 2>&1 &
           for i in $(seq 1 90); do
@@ -101,6 +106,10 @@ jobs:
           sleep 5
           $ADB shell input keyevent 82 || true
           $ADB shell wm dismiss-keyguard || true
+          # отключаем анимации — меньше нагрузки на рендер и стрим
+          $ADB shell settings put global window_animation_scale 0.0 || true
+          $ADB shell settings put global transition_animation_scale 0.0 || true
+          $ADB shell settings put global animator_duration_scale 0.0 || true
 
       - name: Spoof device props (Pixel 6a, Moscow)
         if: github.event.inputs.action == 'run'
