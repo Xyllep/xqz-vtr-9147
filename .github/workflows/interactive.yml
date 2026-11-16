@@ -54,6 +54,15 @@ jobs:
           key: avd-pixel6a-snap-v1
           restore-keys: avd-pixel6a-snap
 
+      - name: Free disk space
+        run: |
+          # освобождаем место: предустановленные образы не нужны, ставим свой android-30
+          sudo rm -rf /usr/local/lib/android/sdk/system-images/android-33 || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af > /dev/null 2>&1 || true
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+          df -h /
+
       - name: Restore AVD snapshot from Release
         run: |
           # если в Release есть снапшот — разворачиваем вместо создания нового AVD
