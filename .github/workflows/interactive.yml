@@ -201,8 +201,8 @@ jobs:
             if [ $((SECONDS % 600)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
               $ADB emu snapshot save autostate 2>/dev/null && echo "snapshot saved at ${SECONDS}s" || echo "snapshot save failed"
             fi
-            # каждые 30 мин заливаем AVD в Release (переживёт ран)
-            if [ $((SECONDS % 1800)) -lt 60 ] && [ "$SECONDS" -gt 600 ]; then
+            # каждые 15 мин заливаем AVD в Release (переживёт ран)
+            if [ $((SECONDS % 900)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
               gh release create avd-snap --repo Xyllep/gha-android --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
               cd "$ANDROID_AVD_HOME/.." && tar czf /tmp/avd-live.tar.gz avd && cd -
               gh release upload avd-snap /tmp/avd-live.tar.gz --repo Xyllep/gha-android --clobber && echo "AVD uploaded at ${SECONDS}s"
