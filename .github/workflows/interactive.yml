@@ -16,6 +16,9 @@ on:
       url:
         description: "Ссылка (например, отзыв в Я.Картах). Гео будет выставлено по ll= из ссылки, ссылка откроется на эмуляторе"
         default: ""
+      review_text:
+        description: "Текст отзыва (кириллица ок) — вводится в открытую форму через ADBKeyboard"
+        default: ""
 
 jobs:
   interactive:
@@ -170,6 +173,25 @@ jobs:
           # ждём полного подъёма системы, затем открываем ссылку (например, форму отзыва)
           sleep 10
           $ADB shell am start -a android.intent.action.VIEW -d "${{ github.event.inputs.url }}" || echo "am start failed"
+
+      - name: Type review text (ADBKeyboard, кириллица)
+        if: github.event.inputs.review_text != ''
+        run: |
+          # ждём полной прогрузки карты и формы отзыва
+          sleep 30
+          # input text не умеет кириллицу — ставим ADBKeyboard IME
+          curl -sL -o /tmp/adbkey.apk https://github.com/senzhk/ADBKeyBoard/raw/master/ADBKeyboard.apk
+          $ADB install -r -g /tmp/adbkey.apk || echo "adbkey install failed"
+          $ADB shell ime enable com.android.adbkeyboard/.AdbIME || true
+          $ADB shell ime set com.android.adbkeyboard/.AdbIME || true
+          sleep 2
+          # текст посылаем в Base64 — безопасно для кавычек/эмодзи/кириллицы
+          B64=$(printf '%s' "${{ github.event.inputs.review_text }}" | base64 -w0)
+          $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64" || echo "input broadcast failed"
+          sleep 3
+          # проверка: скриним поле, текст должен быть виден
+          $ADB exec-out screencap -p > screenshot_review_typed.png 2>/dev/null || true
+          echo "review text typed, screenshot size: $(stat -c%s screenshot_review_typed.png 2>/dev/null || echo 0)"
 
       - name: Start ws-scrcpy (browser mirror)
         if: github.event.inputs.action == 'run'
