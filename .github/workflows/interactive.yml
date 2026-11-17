@@ -183,15 +183,34 @@ jobs:
           curl -sL -o /tmp/adbkey.apk https://github.com/senzhk/ADBKeyBoard/raw/master/ADBKeyboard.apk
           $ADB install -r -g /tmp/adbkey.apk || echo "adbkey install failed"
           $ADB shell ime enable com.android.adbkeyboard/.AdbIME || true
-          $ADB shell ime set com.android.adbkeyboard/.AdbIME || true
-          sleep 2
+          $ADB shell ime set com.android.adbkeyboard/.AdbIME
+          echo "IME now: $($ADB shell settings get secure default_input_method)"
+          # тап по полю "Опишите плюсы и минусы" (720x1560)
+          $ADB shell input tap 360 680
+          sleep 3
           # текст посылаем в Base64 — безопасно для кавычек/эмодзи/кириллицы
           B64=$(printf '%s' "${{ github.event.inputs.review_text }}" | base64 -w0)
-          $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64" || echo "input broadcast failed"
+          $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64"
+          sleep 4
+          # повтор на случай, если фокус перехватили
+          $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64" || true
           sleep 3
-          # проверка: скриним поле, текст должен быть виден
+          # проверка: текст реально в поле? (uiautomator dump; ищем первые слова текста)
+          FRAG=$(printf '%s' "${{ github.event.inputs.review_text }}" | cut -c1-12)
+          $ADB shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
+          $ADB pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1 || true
+          if grep -q "$FRAG" /tmp/ui.xml 2>/dev/null; then
+            echo "OK: текст найден в поле"
+          else
+            echo "WARN: текста в поле нет, повторяю ввод"
+            $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64" || true
+            sleep 3
+            $ADB shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
+            $ADB pull /sdcard/ui.xml /tmp/ui2.xml > /dev/null 2>&1 || true
+            grep -q "$FRAG" /tmp/ui2.xml 2>/dev/null && echo "OK: текст появился со 2-й попытки" || echo "FAIL: текст так и не ввёлся"
+          fi
           $ADB exec-out screencap -p > screenshot_review_typed.png 2>/dev/null || true
-          echo "review text typed, screenshot size: $(stat -c%s screenshot_review_typed.png 2>/dev/null || echo 0)"
+          echo "screenshot: $(stat -c%s screenshot_review_typed.png 2>/dev/null || echo 0)"
 
       - name: Start ws-scrcpy (browser mirror)
         if: github.event.inputs.action == 'run'
