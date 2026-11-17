@@ -71,19 +71,33 @@ jobs:
 
       - name: Restore AVD snapshot from Release
         run: |
-          # если в Release есть снапшот — разворачиваем вместо создания нового AVD
+          # сейв лежит в Release avd-snap: либо частями part_*, либо (старый формат) avd-live.tar.gz
           if gh release view avd-snap --repo Xyllep/gha-android >/dev/null 2>&1; then
-            curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" \
-              "$(gh api repos/Xyllep/gha-android/releases/tags/avd-snap -q '.assets[0].url')" -o /tmp/avd.tar.gz
-            mkdir -p "$ANDROID_AVD_HOME/.."
-            tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.."
-            # принудительно понижаем разрешение у восстановленного AVD (быстрее стрим)
-            CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
-            [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$CFG"
-            ls "$ANDROID_AVD_HOME"
-            echo "restored snapshot AVD"
-            echo "restored=yes" >> $GITHUB_ENV
+            rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
+            gh release download avd-snap --repo Xyllep/gha-android --pattern 'part_*' --dir /tmp/avdparts >/dev/null 2>&1 || true
+            if ls /tmp/avdparts/part_* >/dev/null 2>&1; then
+              cat /tmp/avdparts/part_* > /tmp/avd.tar.gz
+              echo "restoring from parts: $(ls /tmp/avdparts | wc -l) chunk(s), $(stat -c%s /tmp/avd.tar.gz) bytes"
+            else
+              gh release download avd-snap --repo Xyllep/gha-android --pattern 'avd-live.tar.gz' --dir /tmp >/dev/null 2>&1 || true
+              [ -f /tmp/avd-live.tar.gz ] && mv /tmp/avd-live.tar.gz /tmp/avd.tar.gz
+              echo "restoring from legacy single asset"
+            fi
+            if [ -s /tmp/avd.tar.gz ]; then
+              mkdir -p "$ANDROID_AVD_HOME/.."
+              tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.." && echo "restored snapshot AVD"
+              # принудительно понижаем разрешение у восстановленного AVD (быстрее стрим)
+              CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
+              [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$CFG"
+              ls "$ANDROID_AVD_HOME"
+              echo "restored=yes" >> $GITHUB_ENV
+            else
+              echo "WARN: сейв в Release отсутствует/пуст — создаю AVD с нуля"
+            fi
+          else
+            echo "WARN: Release avd-snap не найден — создаю AVD с нуля"
           fi
+          rm -f /tmp/avd.tar.gz
 
       - name: Create AVD (Pixel 6a, 1080x2400@420)
         if: env.restored != 'yes'
@@ -273,11 +287,16 @@ jobs:
             if [ $((SECONDS % 600)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
               $ADB emu snapshot save autostate 2>/dev/null && echo "snapshot saved at ${SECONDS}s" || echo "snapshot save failed"
             fi
-            # каждые 15 мин заливаем AVD в Release (переживёт ран)
+            # каждые 15 мин заливаем AVD в Release (переживёт ран), частями <2ГБ
             if [ $((SECONDS % 900)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
               gh release create avd-snap --repo Xyllep/gha-android --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
-              cd "$ANDROID_AVD_HOME/.." && tar czf /tmp/avd-live.tar.gz avd && cd -
-              gh release upload avd-snap /tmp/avd-live.tar.gz --repo Xyllep/gha-android --clobber && echo "AVD uploaded at ${SECONDS}s"
+              cd "$ANDROID_AVD_HOME/.." && rm -f /tmp/avd.tar.gz /tmp/part_* && tar czf /tmp/avd.tar.gz avd && cd -
+              split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/part_
+              # заливаем новые части, потом удаляем старые ассеты (сейв не теряется при обрыве)
+              gh release upload avd-snap /tmp/part_* --repo Xyllep/gha-android --clobber && echo "AVD uploaded at ${SECONDS}s"
+              OLD_IDS=$(gh api repos/Xyllep/gha-android/releases/tags/avd-snap --jq '.assets[] | select(.name != "part_00" and .name != "part_01" and .name != "part_02" and .name != "part_03") | .id' 2>/dev/null)
+              for ID in $OLD_IDS; do gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true; done
+              echo "cleanup done"
             fi
             # health: туннель жив?
             if ! grep -q "trycloudflare" cf.log 2>/dev/null; then echo "tunnel log missing"; fi
@@ -299,12 +318,16 @@ jobs:
           sleep 10
           $ADB emu kill || true
           sleep 15
-          # упаковываем AVD со снапшотами
+          # упаковываем AVD со снапшотами и заливаем частями <2ГБ
           cd "$ANDROID_AVD_HOME/.."
+          rm -f /tmp/avd-snapshot.tar.gz /tmp/part_*
           tar czf /tmp/avd-snapshot.tar.gz avd
           ls -la /tmp/avd-snapshot.tar.gz
+          split -b 900m -d -a 2 /tmp/avd-snapshot.tar.gz /tmp/part_
           gh release create avd-snap --repo Xyllep/gha-android --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
-          gh release upload avd-snap /tmp/avd-snapshot.tar.gz --repo Xyllep/gha-android --clobber
+          gh release upload avd-snap /tmp/part_* --repo Xyllep/gha-android --clobber
+          OLD_IDS=$(gh api repos/Xyllep/gha-android/releases/tags/avd-snap --jq '.assets[] | select(.name != "part_00" and .name != "part_01" and .name != "part_02" and .name != "part_03") | .id' 2>/dev/null)
+          for ID in $OLD_IDS; do gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true; done
           echo "uploaded"
 
       - name: Upload logs
