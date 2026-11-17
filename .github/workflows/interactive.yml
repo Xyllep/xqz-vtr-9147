@@ -13,6 +13,9 @@ on:
         options:
           - run
           - snapshot
+      url:
+        description: "Ссылка (например, отзыв в Я.Картах). Гео будет выставлено по ll= из ссылки, ссылка откроется на эмуляторе"
+        default: ""
 
 jobs:
   interactive:
@@ -131,7 +134,19 @@ jobs:
           $ADB shell "su 0 setprop persist.sys.timezone Europe/Moscow" || true
           $ADB shell "settings put system time_zone Europe/Moscow" || true
           $ADB shell "setprop persist.sys.locale ru-RU" 2>/dev/null || true
-          $ADB emu geo fix 37.6173 55.7558 || true
+          # гео: если задан url — берём ll=долгота,широта из ссылки, иначе Москва
+          URL_IN="${{ github.event.inputs.url }}"
+          GLON=37.6173; GLAT=55.7558
+          if [ -n "$URL_IN" ]; then
+            LL=$(echo "$URL_IN" | grep -oE 'll=[0-9.]+(%2C|,)[0-9.]+' | head -1 | sed 's/^ll=//; s/%2C/,/')
+            if [ -n "$LL" ]; then
+              GLON=${LL%,*}; GLAT=${LL#*,}
+              echo "geo from URL: lat=$GLAT lon=$GLON"
+            else
+              echo "WARN: ll= не найден в url, оставляю Москву"
+            fi
+          fi
+          $ADB emu geo fix $GLON $GLAT || true
           sleep 2
 
       - name: Install Yandex Maps + Yandex app
@@ -148,6 +163,13 @@ jobs:
             curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "$U" -o "$A"
           done
           $ADB install-multiple -r yandex_base.apk config.ru.apk config.xhdpi.apk || echo "yandex install failed"
+
+      - name: Open target URL
+        if: github.event.inputs.url != ''
+        run: |
+          # ждём полного подъёма системы, затем открываем ссылку (например, форму отзыва)
+          sleep 10
+          $ADB shell am start -a android.intent.action.VIEW -d "${{ github.event.inputs.url }}" || echo "am start failed"
 
       - name: Start ws-scrcpy (browser mirror)
         if: github.event.inputs.action == 'run'
