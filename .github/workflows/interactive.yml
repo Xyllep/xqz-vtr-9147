@@ -197,38 +197,38 @@ jobs:
       - name: Type review text (ADBKeyboard, кириллица)
         if: github.event.inputs.review_text != ''
         run: |
-          # ждём полной прогрузки карты и формы отзыва
-          sleep 30
-          # input text не умеет кириллицу — ставим ADBKeyboard IME
+          # пауза ~3.5 мин: полная прогрузка карты и формы отзыва
+          sleep 210
+          # ставим ADBKeyboard (input text не умеет кириллицу)
           curl -sL -o /tmp/adbkey.apk https://github.com/senzhk/ADBKeyBoard/raw/master/ADBKeyboard.apk
           $ADB install -r -g /tmp/adbkey.apk || echo "adbkey install failed"
           $ADB shell ime enable com.android.adbkeyboard/.AdbIME || true
-          $ADB shell ime set com.android.adbkeyboard/.AdbIME
-          echo "IME now: $($ADB shell settings get secure default_input_method)"
-          # тап по полю "Опишите плюсы и минусы" (720x1560)
+          # тап по полю (720x1560) — клавиатура открывается на сфокусированном поле
           $ADB shell input tap 360 680
           sleep 3
-          # текст посылаем в Base64 — безопасно для кавычек/эмодзи/кириллицы
+          # переключаем IME при активном поле
+          $ADB shell ime set com.android.adbkeyboard/.AdbIME
+          sleep 2
+          echo "IME now: $($ADB shell settings get secure default_input_method)"
           B64=$(printf '%s' "${{ github.event.inputs.review_text }}" | base64 -w0)
-          $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64"
-          sleep 4
-          # повтор на случай, если фокус перехватили
-          $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64" || true
-          sleep 3
-          # проверка: текст реально в поле? (uiautomator dump; ищем первые слова текста)
           FRAG=$(printf '%s' "${{ github.event.inputs.review_text }}" | cut -c1-12)
-          $ADB shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
-          $ADB pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1 || true
-          if grep -q "$FRAG" /tmp/ui.xml 2>/dev/null; then
-            echo "OK: текст найден в поле"
-          else
-            echo "WARN: текста в поле нет, повторяю ввод"
-            $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64" || true
-            sleep 3
-            $ADB shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || true
-            $ADB pull /sdcard/ui.xml /tmp/ui2.xml > /dev/null 2>&1 || true
-            grep -q "$FRAG" /tmp/ui2.xml 2>/dev/null && echo "OK: текст появился со 2-й попытки" || echo "FAIL: текст так и не ввёлся"
-          fi
+          # до 3 попыток: broadcast -> проверка uiautomator
+          for TRY in 1 2 3; do
+            echo "=== attempt $TRY ==="
+            $ADB shell am broadcast -a ADB_INPUT_B64 --es msg "$B64"
+            sleep 5
+            $ADB shell uiautomator dump /sdcard/ui$TRY.xml > /dev/null 2>&1 || true
+            $ADB pull /sdcard/ui$TRY.xml /tmp/ui$TRY.xml > /dev/null 2>&1 || true
+            if grep -q "$FRAG" /tmp/ui$TRY.xml 2>/dev/null; then
+              echo "OK: текст найден в поле (попытка $TRY)"
+              break
+            fi
+            echo "попытка $TRY: текста нет, перекидываю фокус и пробую снова"
+            $ADB shell input tap 360 680
+            sleep 2
+            $ADB shell ime set com.android.adbkeyboard/.AdbIME
+            sleep 2
+          done
           $ADB exec-out screencap -p > screenshot_review_typed.png 2>/dev/null || true
           echo "screenshot: $(stat -c%s screenshot_review_typed.png 2>/dev/null || echo 0)"
 
