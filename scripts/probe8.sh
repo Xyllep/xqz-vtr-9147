@@ -18,9 +18,13 @@ nohup $SDK/emulator/emulator -avd pixel6a \
   > /tmp/emu5.log 2>&1 &
 for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "BOOT OK $((i*5))s"; break; }; done
 $ADB root && sleep 3
-$ADB remount 2>&1 | tail -1
-$ADB shell mount -o remount,rw / 2>/dev/null || true
-$ADB shell mount -o remount,rw /system 2>/dev/null || true
+echo "--- disable-verity ---"
+$ADB disable-verity 2>&1 | tail -2
+$ADB reboot
+for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "REBOOT1 OK $((i*5))s"; break; }; done
+sleep 8; $ADB root && sleep 3
+echo "--- remount ---"
+$ADB remount 2>&1 | tail -2
 sleep 2
 $ADB shell touch /system/.rwtest && { echo "/system writable"; $ADB shell rm /system/.rwtest; } || echo "/system STILL READ-ONLY"
 
