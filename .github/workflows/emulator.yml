@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /usr/local/lib/android/sdk/system-images/android-33
-          key: sysimg-android-30-google_apis-x86_64-v1
+          key: sysimg-android-33-google_apis-x86_64-v1
 
       - name: Enable KVM
         run: |
@@ -40,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.android/avd
-          key: avd-light-v1
+          key: avd-light-api33-v1
 
       - name: Create realistic AVD (Pixel 6a)
         run: |
@@ -49,13 +49,13 @@ jobs:
           # ставим образ, если нет предустановленного
           $SDK/cmdline-tools/latest/bin/sdkmanager --install "emulator" "platform-tools" > /dev/null 2>&1 || true
           if [ ! -d $SDK/system-images/android-33/google_apis/x86_64 ]; then
-            $SDK/cmdline-tools/latest/bin/sdkmanager --install "system-images;android-30;google_apis;x86_64" > /dev/null 2>&1
+            $SDK/cmdline-tools/latest/bin/sdkmanager --install "system-images;android-33;google_apis;x86_64" > /dev/null 2>&1
           else
             echo "образ из кеша — пропускаю установку"
           fi
           if [ ! -d $ANDROID_AVD_HOME/pixel6a.avd ]; then
             echo "no" | $SDK/cmdline-tools/latest/bin/avdmanager create avd \
-              -n pixel6a -k "system-images;android-30;google_apis;x86_64" -d pixel_6a --force
+              -n pixel6a -k "system-images;android-33;google_apis;x86_64" -d pixel_6a --force
             CFG=$(find $ANDROID_AVD_HOME -name config.ini -path "*pixel6a*" | head -1)
             for kv in "hw.lcd.density=420" "hw.lcd.width=1080" "hw.lcd.height=2400" \
                       "hw.gps=yes" "hw.sensors.proximity=yes" "hw.sensors.light=yes" \
