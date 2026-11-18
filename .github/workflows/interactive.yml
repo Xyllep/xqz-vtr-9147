@@ -19,6 +19,9 @@ on:
       review_text:
         description: "Текст отзыва (кириллица ок) — вводится в открытую форму через ADBKeyboard"
         default: ""
+      script:
+        description: "Имя скрипта из scripts/ — выполняется после установки приложений (диагностика)"
+        default: ""
 
 jobs:
   interactive:
@@ -180,7 +183,12 @@ jobs:
           mkdir -p /tmp/apks && cd /tmp/apks
           URL=$(gh api repos/Xyllep/gha-android/releases/tags/maps-apk -q '.assets[0].url')
           curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "$URL" -o maps.apk
-          $ADB install -r -g maps.apk
+          echo "== ABI устройства: $($ADB shell getprop ro.product.cpu.abilist)"
+          echo "== native bridge: $($ADB shell getprop ro.dalvik.vm.native.bridge)"
+          $ADB shell ls /system/lib64/ 2>/dev/null | grep -i -E "ndk|houdini" || echo "нет транслятора в /system/lib64"
+          echo "== ABI в maps.apk: $(unzip -l maps.apk | grep -oE 'lib/[a-z0-9_-]+/' | sort -u | tr '\n' ' ')"
+          # пробуем обычную установку, затем с явным --abi arm64-v8a (если есть трансляция)
+          $ADB install -r -g maps.apk || $ADB install -r -g --abi arm64-v8a maps.apk || echo "MAPS INSTALL FAILED (нефатально)"
           # Yandex app (3 сплита)
           mkdir -p /tmp/ya && cd /tmp/ya
           for A in yandex_base.apk config.ru.apk config.xhdpi.apk; do
@@ -188,6 +196,7 @@ jobs:
             curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "$U" -o "$A"
           done
           $ADB install-multiple -r yandex_base.apk config.ru.apk config.xhdpi.apk || echo "yandex install failed"
+          cd - >/dev/null
 
       - name: Open target URL
         if: github.event.inputs.url != ''
@@ -233,6 +242,24 @@ jobs:
           done
           $ADB exec-out screencap -p > screenshot_review_typed.png 2>/dev/null || true
           echo "screenshot: $(stat -c%s screenshot_review_typed.png 2>/dev/null || echo 0)"
+
+      - name: Run automation script (диагностика)
+        if: github.event.inputs.script != ''
+        run: |
+          mkdir -p probe
+          chmod +x scripts/${{ github.event.inputs.script }} 2>/dev/null || true
+          bash scripts/${{ github.event.inputs.script }} 2>&1 | tee probe/output.txt
+          $ADB exec-out screencap -p > probe/screen_after_script.png 2>/dev/null || true
+
+      - name: Upload probe artifacts (early)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-results
+          path: |
+            probe/
+            screenshot_review_typed.png
+          if-no-files-found: ignore
 
       - name: Start ws-scrcpy (browser mirror)
         if: github.event.inputs.action == 'run'
