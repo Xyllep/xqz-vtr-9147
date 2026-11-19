@@ -131,7 +131,7 @@ jobs:
           sudo sysctl vm.overcommit_memory=1 || true
           nohup $SDK/emulator/emulator -avd pixel6a \
             -no-window -no-boot-anim -no-metrics -no-audio \
-            -gpu swiftshader_indirect -accel on \
+            -gpu swiftshader_indirect -accel on -writable-system \
             -feature -Vulkan \
             -memory 4096 -cores 4 \
             -camera-back emulated -camera-front emulated \
@@ -177,18 +177,59 @@ jobs:
           $ADB emu geo fix $GLON $GLAT || true
           sleep 2
 
-      - name: Install Yandex Maps + Yandex app
+      - name: ARM translation + Install Yandex Maps + Yandex app
         if: github.event.inputs.action == 'run'
         run: |
+          set -e
+          echo "=== Пересадка libndk_translation (ARM->x86_64) ==="
+          $ADB root || true; sleep 3
+          $ADB disable-verity || true
+          $ADB reboot
+          for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "REBOOT1 OK $((i*5))s"; break; }; done
+          sleep 8; $ADB root || true; sleep 3
+          $ADB remount; sleep 2
+          # тарбол транслятора из релиза maps-apk
+          gh release download maps-apk --repo Xyllep/gha-android --dir /tmp/nbdl --pattern 'libndk_translation-12.0.0.tar'
+          mkdir -p /tmp/nb && tar -xf /tmp/nbdl/libndk_translation-12.0.0.tar -C /tmp/nb
+          cd /tmp/nb
+          for F in $(tar -tf /tmp/nbdl/libndk_translation-12.0.0.tar | grep -v '/$'); do
+            REL=${F#system/}
+            $ADB shell mkdir -p "/system/$(dirname $REL)"
+            $ADB push "$F" "/system/$REL" >/dev/null 2>&1 || echo "FAIL $REL"
+          done
+          $ADB shell chmod 755 /system/bin/arm64/* /system/bin/ndk_translation_program_runner_binfmt_misc_arm64 2>/dev/null || true
+          cd - >/dev/null
+          # abilist: все три источника (odm/vendor/system) -> x86_64,arm64-v8a
+          for PF in /system/build.prop /vendor/build.prop /odm/etc/build.prop; do
+            $ADB pull $PF /tmp/bpx >/dev/null 2>&1 || { echo "нет $PF"; continue; }
+            sed -i \
+              -e "s|^ro.odm.product.cpu.abilist=.*|ro.odm.product.cpu.abilist=x86_64,arm64-v8a|" \
+              -e "s|^ro.vendor.product.cpu.abilist=.*|ro.vendor.product.cpu.abilist=x86_64,arm64-v8a|" \
+              -e "s|^ro.system.product.cpu.abilist=.*|ro.system.product.cpu.abilist=x86_64,arm64-v8a|" \
+              -e "s|^ro.odm.product.cpu.abilist64=.*|ro.odm.product.cpu.abilist64=x86_64,arm64-v8a|" \
+              -e "s|^ro.vendor.product.cpu.abilist64=.*|ro.vendor.product.cpu.abilist64=x86_64,arm64-v8a|" \
+              -e "s|^ro.system.product.cpu.abilist64=.*|ro.system.product.cpu.abilist64=x86_64,arm64-v8a|" \
+              -e "s|^ro.dalvik.vm.native.bridge=.*|ro.dalvik.vm.native.bridge=libnb.so|" \
+              /tmp/bpx
+            $ADB push /tmp/bpx $PF >/dev/null
+            $ADB shell chmod 644 $PF
+          done
+          $ADB reboot
+          for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "REBOOT2 OK $((i*5))s"; break; }; done
+          sleep 10
+          echo "== abilist: $($ADB shell getprop ro.product.cpu.abilist)"
+          echo "== bridge: $($ADB shell getprop ro.dalvik.vm.native.bridge)"
+          $ADB shell input keyevent 82 || true
+          $ADB shell wm dismiss-keyguard || true
+          $ADB shell settings put global window_animation_scale 0.0 || true
+          $ADB shell settings put global transition_animation_scale 0.0 || true
+          $ADB shell settings put global animator_duration_scale 0.0 || true
+
+          echo "=== Установка Карт ==="
           mkdir -p /tmp/apks && cd /tmp/apks
-          URL=$(gh api repos/Xyllep/gha-android/releases/tags/maps-apk -q '.assets[0].url')
-          curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "$URL" -o maps.apk
-          echo "== ABI устройства: $($ADB shell getprop ro.product.cpu.abilist)"
-          echo "== native bridge: $($ADB shell getprop ro.dalvik.vm.native.bridge)"
-          $ADB shell ls /system/lib64/ 2>/dev/null | grep -i -E "ndk|houdini" || echo "нет транслятора в /system/lib64"
-          echo "== ABI в maps.apk: $(unzip -l maps.apk | grep -oE 'lib/[a-z0-9_-]+/' | sort -u | tr '\n' ' ')"
-          # пробуем обычную установку, затем с явным --abi arm64-v8a (если есть трансляция)
-          $ADB install -r -g maps.apk || $ADB install -r -g --abi arm64-v8a maps.apk || echo "MAPS INSTALL FAILED (нефатально)"
+          gh release download maps-apk --repo Xyllep/gha-android --dir /tmp/apks --pattern 'maps3021.apk'
+          unzip -t maps3021.apk >/dev/null && echo "apk OK" || echo "apk BROKEN"
+          $ADB install -r -g maps3021.apk || echo "MAPS INSTALL FAILED (нефатально)"
           # Yandex app (3 сплита)
           mkdir -p /tmp/ya && cd /tmp/ya
           for A in yandex_base.apk config.ru.apk config.xhdpi.apk; do
