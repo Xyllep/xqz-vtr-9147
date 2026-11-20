@@ -80,22 +80,28 @@ jobs:
       - name: Restore AVD snapshot from Release
         if: github.event.inputs.fresh != 'yes'
         run: |
-          # сейв: основной Release avd-snap, резервный avd-backup; части part_* или старый avd-live.tar.gz
+          # сейв: основной Release avd-snap, резервный avd-backup; наборы s<ts>_part_* (с проверкой) или legacy part_*
           rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
           for TAG in avd-snap avd-backup; do
             gh release view $TAG --repo Xyllep/gha-android >/dev/null 2>&1 || continue
             echo "пробую сейв из $TAG"
             rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
-            gh release download $TAG --repo Xyllep/gha-android --pattern 'part_*' --dir /tmp/avdparts >/dev/null 2>&1 || true
-            if ls /tmp/avdparts/part_* >/dev/null 2>&1; then
-              cat /tmp/avdparts/part_* > /tmp/avd.tar.gz
+            # выбираем самый свежий полный набор s<ts>_part_*
+            NEWEST=$(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq '.assets[].name' 2>/dev/null | grep -oE '^s[0-9]+_part_00$' | sed 's/_part_00$//' | sort | tail -1)
+            if [ -n "$NEWEST" ]; then
+              gh release download $TAG --repo Xyllep/gha-android --pattern "${NEWEST}_part_*" --dir /tmp/avdparts >/dev/null 2>&1 || true
+            else
+              gh release download $TAG --repo Xyllep/gha-android --pattern 'part_*' --dir /tmp/avdparts >/dev/null 2>&1 || true
+            fi
+            if ls /tmp/avdparts/*part_* >/dev/null 2>&1; then
+              cat /tmp/avdparts/*part_* > /tmp/avd.tar.gz
               echo "restoring from $TAG parts: $(ls /tmp/avdparts | wc -l) chunk(s), $(stat -c%s /tmp/avd.tar.gz) bytes"
             else
               gh release download $TAG --repo Xyllep/gha-android --pattern 'avd-live.tar.gz' --dir /tmp >/dev/null 2>&1 || true
               [ -f /tmp/avd-live.tar.gz ] && mv /tmp/avd-live.tar.gz /tmp/avd.tar.gz
               echo "restoring from $TAG legacy single asset"
             fi
-            if [ -s /tmp/avd.tar.gz ]; then
+            if [ -s /tmp/avd.tar.gz ] && gzip -t /tmp/avd.tar.gz 2>/dev/null; then
               mkdir -p "$ANDROID_AVD_HOME/.."
               rm -rf "$ANDROID_AVD_HOME"
               if tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.."; then
@@ -379,16 +385,21 @@ jobs:
               $ADB emu snapshot save autostate 2>/dev/null && echo "snapshot saved at ${SECONDS}s" || echo "snapshot save failed"
             fi
             # каждые 15 мин заливаем AVD в Release (переживёт ран), частями <2ГБ, на 2 тега
-            if [ $((SECONDS % 900)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
-              cd "$ANDROID_AVD_HOME/.." && rm -f /tmp/avd.tar.gz /tmp/part_* && tar czf /tmp/avd.tar.gz avd && cd -
-              split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/part_
+            if [ $((SECONDS % 900)) -lt 45 ] && [ "$SECONDS" -gt 300 ] && [ ! -f /tmp/avd_saving.lock ]; then
+              touch /tmp/avd_saving.lock
+              TS="s$(date -u +%Y%m%d%H%M%S)"
+              cd "$ANDROID_AVD_HOME/.." && rm -f /tmp/avd.tar.gz /tmp/part_* /tmp/${TS}_part_* && tar czf /tmp/avd.tar.gz avd && cd -
+              gzip -t /tmp/avd.tar.gz || { echo "tar битый, сейв пропущен"; rm -f /tmp/avd_saving.lock; continue; }
+              split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/${TS}_part_
               for TAG in avd-snap avd-backup; do
                 gh release create $TAG --repo Xyllep/gha-android --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
-                gh release upload $TAG /tmp/part_* --repo Xyllep/gha-android --clobber && echo "AVD -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
-                OLD_IDS=$(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq '.assets[] | select(.name != "part_00" and .name != "part_01" and .name != "part_02" and .name != "part_03") | .id' 2>/dev/null)
-                for ID in $OLD_IDS; do gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true; done
+                gh release upload $TAG /tmp/${TS}_part_* --repo Xyllep/gha-android --clobber && echo "AVD $TS -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
+                # удаляем все части не от текущего сейва
+                for ID in $(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
+                  gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true
+                done
               done
-              rm -f /tmp/avd.tar.gz /tmp/part_*
+              rm -f /tmp/avd.tar.gz /tmp/${TS}_part_* /tmp/avd_saving.lock
               echo "cleanup done"
             fi
             # health: туннель жив?
@@ -416,12 +427,14 @@ jobs:
           rm -f /tmp/avd-snapshot.tar.gz /tmp/part_*
           tar czf /tmp/avd-snapshot.tar.gz avd
           ls -la /tmp/avd-snapshot.tar.gz
-          split -b 900m -d -a 2 /tmp/avd-snapshot.tar.gz /tmp/part_
+          TS="s$(date -u +%Y%m%d%H%M%S)"
+          split -b 900m -d -a 2 /tmp/avd-snapshot.tar.gz /tmp/${TS}_part_
           for TAG in avd-snap avd-backup; do
             gh release create $TAG --repo Xyllep/gha-android --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
-            gh release upload $TAG /tmp/part_* --repo Xyllep/gha-android --clobber || echo "upload to $TAG FAILED"
-            OLD_IDS=$(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq '.assets[] | select(.name != "part_00" and .name != "part_01" and .name != "part_02" and .name != "part_03") | .id' 2>/dev/null)
-            for ID in $OLD_IDS; do gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true; done
+            gh release upload $TAG /tmp/${TS}_part_* --repo Xyllep/gha-android --clobber || echo "upload to $TAG FAILED"
+            for ID in $(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
+              gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true
+            done
           done
           echo "uploaded"
 
