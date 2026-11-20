@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.android/avd
-          key: avd-pixel6a-api33-v1
+          key: avd-pixel6a-api31-v1
           restore-keys: avd-pixel6a-snap
 
       - name: Free disk space
