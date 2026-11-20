@@ -51,26 +51,26 @@ jobs:
       - name: Cache Android system image
         uses: actions/cache@v4
         with:
-          path: /usr/local/lib/android/sdk/system-images/android-31
-          key: sysimg-android-31-google_apis-x86_64-v1
+          path: /usr/local/lib/android/sdk/system-images/android-30
+          key: sysimg-android-30-google_apis-x86_64-v1
 
       - name: Install system image + emulator
         run: |
           yes | $SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          $SDK/cmdline-tools/latest/bin/sdkmanager "emulator" "platform-tools" "system-images;android-31;google_apis;x86_64" > /dev/null
+          $SDK/cmdline-tools/latest/bin/sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64" > /dev/null
 
       - name: Cache AVD (with snapshots)
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.android/avd
-          key: avd-pixel6a-api31-v1
+          key: avd-pixel6a-api30-v1
           restore-keys: avd-pixel6a-snap
 
       - name: Free disk space
         run: |
-          # освобождаем место: чужие предустановленные образы не нужны, ставим свой android-31
+          # освобождаем место: чужие предустановленные образы не нужны, ставим свой android-30
           for D in /usr/local/lib/android/sdk/system-images/android-*; do
-            [ "$D" = "/usr/local/lib/android/sdk/system-images/android-31" ] || sudo rm -rf "$D" || true
+            [ "$D" = "/usr/local/lib/android/sdk/system-images/android-30" ] || sudo rm -rf "$D" || true
           done
           sudo rm -rf /opt/hostedtoolcache/CodeQL || true
           sudo docker image prune -af > /dev/null 2>&1 || true
@@ -128,7 +128,7 @@ jobs:
         run: |
           rm -rf "$ANDROID_AVD_HOME"
           mkdir -p "$ANDROID_AVD_HOME"
-          echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-31;google_apis;x86_64" -d pixel_6a --force
+          echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-30;google_apis;x86_64" -d pixel_6a --force
           CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
           cat >> "$CFG" <<EOF
           hw.lcd.width=720
