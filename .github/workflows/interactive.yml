@@ -133,7 +133,7 @@ jobs:
             -no-window -no-boot-anim -no-metrics -no-audio \
             -gpu swiftshader_indirect -accel on -writable-system \
             -feature -Vulkan \
-            -memory 4096 -cores 4 \
+            -memory 2048 -cores 2 \
             -camera-back emulated -camera-front emulated \
             > emulator.log 2>&1 &
           for i in $(seq 1 90); do
