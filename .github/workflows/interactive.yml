@@ -93,14 +93,17 @@ jobs:
             fi
             if [ -s /tmp/avd.tar.gz ]; then
               mkdir -p "$ANDROID_AVD_HOME/.."
+              rm -rf "$ANDROID_AVD_HOME"
               if tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.."; then
                 echo "restored snapshot AVD from $TAG"
                 CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
-                [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=4/' "$CFG"
+                [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=2/' "$CFG"
                 ls "$ANDROID_AVD_HOME"
                 echo "restored=yes" >> $GITHUB_ENV
                 rm -f /tmp/avd.tar.gz
                 break
+              else
+                rm -rf "$ANDROID_AVD_HOME"
               fi
             fi
             echo "WARN: в $TAG нет валидного сейва"
@@ -113,6 +116,7 @@ jobs:
       - name: Create AVD (Pixel 6a, 1080x2400@420)
         if: env.restored != 'yes'
         run: |
+          rm -rf "$ANDROID_AVD_HOME"
           mkdir -p "$ANDROID_AVD_HOME"
           echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-33;google_apis;x86_64" -d pixel_6a --force
           CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
@@ -121,7 +125,7 @@ jobs:
           hw.lcd.height=1560
           hw.lcd.density=280
           hw.ramSize=4096
-          hw.cpu.ncore=4
+          hw.cpu.ncore=2
           disk.dataPartition.size=8G
           EOF
 
