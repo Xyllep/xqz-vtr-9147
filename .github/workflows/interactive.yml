@@ -102,19 +102,25 @@ jobs:
               echo "restoring from $TAG legacy single asset"
             fi
             if [ -s /tmp/avd.tar.gz ] && gzip -t /tmp/avd.tar.gz 2>/dev/null; then
-              mkdir -p "$ANDROID_AVD_HOME/.."
-              rm -rf "$ANDROID_AVD_HOME"
-              if tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.."; then
-                echo "restored snapshot AVD from $TAG"
-                CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
-                [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=2/' "$CFG"
-                ls "$ANDROID_AVD_HOME"
-                echo "restored=yes" >> $GITHUB_ENV
-                rm -f /tmp/avd.tar.gz
-                break
+              mkdir -p "$ANDROID_AVD_HOME"
+              rm -rf "$ANDROID_AVD_HOME/pixel6a.avd" "$ANDROID_AVD_HOME/pixel6a.ini" "$ANDROID_AVD_HOME/avd"
+              # новый формат: pixel6a.ini + pixel6a.avd; legacy: каталог avd/
+              if tar tzf /tmp/avd.tar.gz | grep -q "^pixel6a"; then
+                tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME"
+                echo "restored snapshot AVD from $TAG (pixel6a layout)"
               else
-                rm -rf "$ANDROID_AVD_HOME"
+                tar xzf /tmp/avd.tar.gz -C "$ANDROID_AVD_HOME/.."
+                echo "restored snapshot AVD from $TAG (legacy layout)"
               fi
+              rm -rf "$ANDROID_AVD_HOME/pixel6a.avd/snapshots" "$ANDROID_AVD_HOME/pixel6a.avd/hardware-qemu.ini" "$ANDROID_AVD_HOME/pixel6a.avd"/*.lock "$ANDROID_AVD_HOME/pixel6a.avd/cache.img"* 2>/dev/null
+              CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
+              [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=2/' "$CFG"
+              ls "$ANDROID_AVD_HOME"
+              echo "restored=yes" >> $GITHUB_ENV
+              rm -f /tmp/avd.tar.gz
+              break
+            else
+              rm -rf "$ANDROID_AVD_HOME/pixel6a.avd" "$ANDROID_AVD_HOME/pixel6a.ini"
             fi
             echo "WARN: в $TAG нет валидного сейва"
             rm -f /tmp/avd.tar.gz
@@ -145,7 +151,7 @@ jobs:
           sudo sysctl vm.overcommit_memory=1 || true
           nohup $SDK/emulator/emulator -avd pixel6a \
             -no-window -no-boot-anim -no-metrics -no-audio \
-            -gpu swiftshader_indirect -accel on -writable-system \
+            -gpu swiftshader_indirect -accel on -writable-system -no-snapshot \
             -feature -Vulkan \
             -memory 2048 -cores 2 \
             -camera-back emulated -camera-front emulated \
@@ -380,20 +386,33 @@ jobs:
           END=$((SECONDS + MIN*60))
           while [ $SECONDS -lt $END ]; do
             sleep 60
-            # каждые 10 мин сохраняем снапшот живого состояния (логин, сессии)
-            if [ $((SECONDS % 600)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
-              $ADB emu snapshot save autostate 2>/dev/null && echo "snapshot saved at ${SECONDS}s" || echo "snapshot save failed"
-            fi
-            # каждые 15 мин: СТАРЫЙ МЕХАНИЗМ — глушим эмулятор, снимаем tar с покоящегося диска, поднимаем снова
+            # (старый 10-мин snapshot save убран: QuickBoot не используется, -no-snapshot)
+            # каждые 15 мин: штатное выключение Android, tar покойного диска, подъем снова
             if [ $((SECONDS % 900)) -lt 45 ] && [ "$SECONDS" -gt 300 ] && [ ! -f /tmp/avd_saving.lock ]; then
               touch /tmp/avd_saving.lock
-              echo "=== старый механизм сейва: глушим эмулятор ==="
-              $ADB emu snapshot save autostate 2>/dev/null || true
+              echo "=== штатный shutdown Android ==="
+              sleep 15
+              $ADB shell sync || true
+              $ADB shell reboot -p || $ADB shell svc power shutdown || true
+              for i in $(seq 1 30); do
+                $ADB get-state >/dev/null 2>&1 || { echo "adb отвалился (Android погас)"; break; }
+                sleep 1
+              done
               sleep 10
-              $ADB emu kill || true
+              $ADB emu kill >/dev/null 2>&1 || true
               sleep 20
               TS="s$(date -u +%Y%m%d%H%M%S)"
-              cd "$ANDROID_AVD_HOME/.." && rm -f /tmp/avd.tar.gz /tmp/part_* /tmp/${TS}_part_* && tar czf /tmp/avd.tar.gz avd && cd -
+              # чистка: снапшоты, hardware-qemu.ini, локи, кеш
+              AVDD="$ANDROID_AVD_HOME/pixel6a.avd"
+              rm -rf "$AVDD/snapshots" "$AVDD/hardware-qemu.ini" "$AVDD"/*.lock "$AVDD/cache.img"*
+              # rebase qcow2 на относительные пути
+              sudo apt-get install -y qemu-utils >/dev/null 2>&1 || true
+              for q in "$AVDD"/*.qcow2; do
+                [ -f "$q" ] || continue
+                base="${q%.qcow2}"
+                [ -f "$base" ] && qemu-img rebase -u -F qcow2 -b "$(basename "$base")" "$q" || true
+              done
+              cd "$ANDROID_AVD_HOME" && rm -f /tmp/avd.tar.gz /tmp/part_* /tmp/${TS}_part_* && tar czf /tmp/avd.tar.gz pixel6a.ini pixel6a.avd && cd -
               gzip -t /tmp/avd.tar.gz || { echo "tar битый, сейв пропущен"; rm -f /tmp/avd_saving.lock; }
               if [ -f /tmp/avd_saving.lock ]; then
                 split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/${TS}_part_
@@ -410,7 +429,7 @@ jobs:
               cd "$ANDROID_AVD_HOME/.."
               nohup $SDK/emulator/emulator -avd pixel6a \
                 -no-window -no-boot-anim -no-metrics -no-audio \
-                -gpu swiftshader_indirect -accel on \
+                -gpu swiftshader_indirect -accel on -writable-system -no-snapshot \
                 -memory 2048 -cores 2 \
                 -camera-back emulated -camera-front emulated \
                 > emulator.log 2>&1 &
@@ -439,16 +458,31 @@ jobs:
             B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$B" = "1" ] && break
           done
-          $ADB emu snapshot save autostate || true
-          sleep 10
-          $ADB emu kill || true
+          # штатное выключение Android вместо snapshot save + kill
           sleep 15
-          # упаковываем AVD со снапшотами и заливаем частями <2ГБ
-          cd "$ANDROID_AVD_HOME/.."
-          rm -f /tmp/avd-snapshot.tar.gz /tmp/part_*
-          tar czf /tmp/avd-snapshot.tar.gz avd
-          ls -la /tmp/avd-snapshot.tar.gz
+          $ADB shell sync || true
+          $ADB shell reboot -p || $ADB shell svc power shutdown || true
+          for i in $(seq 1 30); do
+            $ADB get-state >/dev/null 2>&1 || { echo "adb отвалился (Android погас)"; break; }
+            sleep 1
+          done
+          sleep 10
+          $ADB emu kill >/dev/null 2>&1 || true
+          sleep 20
+          # упаковываем AVD: чистка + rebase + pixel6a layout
+          AVDD="$ANDROID_AVD_HOME/pixel6a.avd"
+          rm -rf "$AVDD/snapshots" "$AVDD/hardware-qemu.ini" "$AVDD"/*.lock "$AVDD/cache.img"*
+          sudo apt-get install -y qemu-utils >/dev/null 2>&1 || true
+          for q in "$AVDD"/*.qcow2; do
+            [ -f "$q" ] || continue
+            base="${q%.qcow2}"
+            [ -f "$base" ] && qemu-img rebase -u -F qcow2 -b "$(basename "$base")" "$q" || true
+          done
+          cd "$ANDROID_AVD_HOME"
+          rm -f /tmp/avd-snapshot.tar.gz /tmp/part_* /tmp/${TS}_part_* 2>/dev/null
           TS="s$(date -u +%Y%m%d%H%M%S)"
+          tar czf /tmp/avd-snapshot.tar.gz pixel6a.ini pixel6a.avd
+          ls -la /tmp/avd-snapshot.tar.gz
           split -b 900m -d -a 2 /tmp/avd-snapshot.tar.gz /tmp/${TS}_part_
           for TAG in avd-snap avd-backup; do
             gh release create $TAG --repo Xyllep/gha-android --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
