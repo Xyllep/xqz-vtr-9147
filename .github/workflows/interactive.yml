@@ -76,21 +76,21 @@ jobs:
           # сейв: основной Release avd-snap, резервный avd-backup; наборы s<ts>_part_* (с проверкой) или legacy part_*
           rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
           for TAG in avd-snap avd-backup; do
-            gh release view $TAG  >/dev/null 2>&1 || continue
+            gh release view $TAG -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || continue
             echo "пробую сейв из $TAG"
             rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
             # выбираем самый свежий полный набор s<ts>_part_*
             NEWEST=$(gh api repos/$GITHUB_REPOSITORY/releases/tags/$TAG --jq '.assets[].name' 2>/dev/null | grep -oE '^s[0-9]+_part_00$' | sed 's/_part_00$//' | sort | tail -1)
             if [ -n "$NEWEST" ]; then
-              gh release download $TAG  --pattern "${NEWEST}_part_*" --dir /tmp/avdparts >/dev/null 2>&1 || true
+              gh release download $TAG -R "$GITHUB_REPOSITORY" --pattern "${NEWEST}_part_*" --dir /tmp/avdparts >/dev/null 2>&1 || true
             else
-              gh release download $TAG  --pattern 'part_*' --dir /tmp/avdparts >/dev/null 2>&1 || true
+              gh release download $TAG -R "$GITHUB_REPOSITORY" --pattern 'part_*' --dir /tmp/avdparts >/dev/null 2>&1 || true
             fi
             if ls /tmp/avdparts/*part_* >/dev/null 2>&1; then
               cat /tmp/avdparts/*part_* > /tmp/avd.tar.gz
               echo "restoring from $TAG parts: $(ls /tmp/avdparts | wc -l) chunk(s), $(stat -c%s /tmp/avd.tar.gz) bytes"
             else
-              gh release download $TAG  --pattern 'avd-live.tar.gz' --dir /tmp >/dev/null 2>&1 || true
+              gh release download $TAG -R "$GITHUB_REPOSITORY" --pattern 'avd-live.tar.gz' --dir /tmp >/dev/null 2>&1 || true
               [ -f /tmp/avd-live.tar.gz ] && mv /tmp/avd-live.tar.gz /tmp/avd.tar.gz
               echo "restoring from $TAG legacy single asset"
             fi
@@ -232,7 +232,7 @@ jobs:
           sleep 8; $ADB root || true; sleep 3
           $ADB remount; sleep 2
           # тарбол транслятора из релиза maps-apk: один push вместо 96
-          gh release download maps-apk  --dir /tmp/nbdl --pattern 'libndk_translation-12.0.0.tar'
+          gh release download maps-apk -R "$GITHUB_REPOSITORY" --dir /tmp/nbdl --pattern 'libndk_translation-12.0.0.tar'
           mkdir -p /tmp/nb && tar -xf /tmp/nbdl/libndk_translation-12.0.0.tar -C /tmp/nb
           cd /tmp/nb && tar cf /tmp/ndk.tar system && cd - >/dev/null
           $ADB push /tmp/ndk.tar /data/local/tmp/ndk.tar
@@ -285,7 +285,7 @@ jobs:
 
           echo "=== Установка Карт ==="
           mkdir -p /tmp/apks && cd /tmp/apks
-          gh release download maps-apk  --dir /tmp/apks --pattern 'maps3021.apk'
+          gh release download maps-apk -R "$GITHUB_REPOSITORY" --dir /tmp/apks --pattern 'maps3021.apk'
           unzip -t maps3021.apk >/dev/null && echo "apk OK" || echo "apk BROKEN"
           $ADB install -r -g maps3021.apk || echo "MAPS INSTALL FAILED (нефатально)"
           # Yandex app (3 сплита)
@@ -459,8 +459,8 @@ jobs:
               if [ -f /tmp/avd_saving.lock ]; then
                 split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/${TS}_part_
                 for TAG in avd-snap avd-backup; do
-                  gh release create $TAG  --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
-                  gh release upload $TAG /tmp/${TS}_part_*  --clobber && echo "AVD $TS -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
+                  gh release create $TAG -R "$GITHUB_REPOSITORY" --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
+                  gh release upload $TAG /tmp/${TS}_part_* -R "$GITHUB_REPOSITORY" --clobber && echo "AVD $TS -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
                   for ID in $(gh api repos/$GITHUB_REPOSITORY/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
                     gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/assets/$ID > /dev/null 2>&1 || true
                   done
@@ -529,8 +529,8 @@ jobs:
           ls -la /tmp/avd-snapshot.tar.gz
           split -b 900m -d -a 2 /tmp/avd-snapshot.tar.gz /tmp/${TS}_part_
           for TAG in avd-snap avd-backup; do
-            gh release create $TAG  --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
-            gh release upload $TAG /tmp/${TS}_part_*  --clobber || echo "upload to $TAG FAILED"
+            gh release create $TAG -R "$GITHUB_REPOSITORY" --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
+            gh release upload $TAG /tmp/${TS}_part_* -R "$GITHUB_REPOSITORY" --clobber || echo "upload to $TAG FAILED"
             for ID in $(gh api repos/$GITHUB_REPOSITORY/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
               gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/assets/$ID > /dev/null 2>&1 || true
             done
