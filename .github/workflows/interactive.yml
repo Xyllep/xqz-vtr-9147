@@ -51,26 +51,19 @@ jobs:
       - name: Cache Android system image
         uses: actions/cache@v4
         with:
-          path: /usr/local/lib/android/sdk/system-images/android-30
-          key: sysimg-android-30-google_apis-x86_64-v1
+          path: /usr/local/lib/android/sdk/system-images/android-31
+          key: sysimg-android-31-google_apis-x86_64-v1
 
       - name: Install system image + emulator
         run: |
           yes | $SDK/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          $SDK/cmdline-tools/latest/bin/sdkmanager "emulator" "platform-tools" "system-images;android-30;google_apis;x86_64" > /dev/null
-
-      - name: Cache AVD (with snapshots)
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.android/avd
-          key: avd-pixel6a-api30-v1
-          restore-keys: avd-pixel6a-snap
+          $SDK/cmdline-tools/latest/bin/sdkmanager "emulator" "platform-tools" "system-images;android-31;google_apis;x86_64" > /dev/null
 
       - name: Free disk space
         run: |
-          # освобождаем место: чужие предустановленные образы не нужны, ставим свой android-30
+          # освобождаем место: чужие предустановленные образы не нужны, ставим свой android-31
           for D in /usr/local/lib/android/sdk/system-images/android-*; do
-            [ "$D" = "/usr/local/lib/android/sdk/system-images/android-30" ] || sudo rm -rf "$D" || true
+            [ "$D" = "/usr/local/lib/android/sdk/system-images/android-31" ] || sudo rm -rf "$D" || true
           done
           sudo rm -rf /opt/hostedtoolcache/CodeQL || true
           sudo docker image prune -af > /dev/null 2>&1 || true
@@ -83,21 +76,21 @@ jobs:
           # сейв: основной Release avd-snap, резервный avd-backup; наборы s<ts>_part_* (с проверкой) или legacy part_*
           rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
           for TAG in avd-snap avd-backup; do
-            gh release view $TAG --repo Xyllep/gha-android >/dev/null 2>&1 || continue
+            gh release view $TAG  >/dev/null 2>&1 || continue
             echo "пробую сейв из $TAG"
             rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
             # выбираем самый свежий полный набор s<ts>_part_*
-            NEWEST=$(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq '.assets[].name' 2>/dev/null | grep -oE '^s[0-9]+_part_00$' | sed 's/_part_00$//' | sort | tail -1)
+            NEWEST=$(gh api repos/$GITHUB_REPOSITORY/releases/tags/$TAG --jq '.assets[].name' 2>/dev/null | grep -oE '^s[0-9]+_part_00$' | sed 's/_part_00$//' | sort | tail -1)
             if [ -n "$NEWEST" ]; then
-              gh release download $TAG --repo Xyllep/gha-android --pattern "${NEWEST}_part_*" --dir /tmp/avdparts >/dev/null 2>&1 || true
+              gh release download $TAG  --pattern "${NEWEST}_part_*" --dir /tmp/avdparts >/dev/null 2>&1 || true
             else
-              gh release download $TAG --repo Xyllep/gha-android --pattern 'part_*' --dir /tmp/avdparts >/dev/null 2>&1 || true
+              gh release download $TAG  --pattern 'part_*' --dir /tmp/avdparts >/dev/null 2>&1 || true
             fi
             if ls /tmp/avdparts/*part_* >/dev/null 2>&1; then
               cat /tmp/avdparts/*part_* > /tmp/avd.tar.gz
               echo "restoring from $TAG parts: $(ls /tmp/avdparts | wc -l) chunk(s), $(stat -c%s /tmp/avd.tar.gz) bytes"
             else
-              gh release download $TAG --repo Xyllep/gha-android --pattern 'avd-live.tar.gz' --dir /tmp >/dev/null 2>&1 || true
+              gh release download $TAG  --pattern 'avd-live.tar.gz' --dir /tmp >/dev/null 2>&1 || true
               [ -f /tmp/avd-live.tar.gz ] && mv /tmp/avd-live.tar.gz /tmp/avd.tar.gz
               echo "restoring from $TAG legacy single asset"
             fi
@@ -113,6 +106,13 @@ jobs:
                 echo "restored snapshot AVD from $TAG (legacy layout)"
               fi
               rm -rf "$ANDROID_AVD_HOME/pixel6a.avd/snapshots" "$ANDROID_AVD_HOME/pixel6a.avd/hardware-qemu.ini" "$ANDROID_AVD_HOME/pixel6a.avd"/*.lock "$ANDROID_AVD_HOME/pixel6a.avd/cache.img"* 2>/dev/null
+              # pixel6a.ini перезаписываем под текущий раннер (path зашит с чужого)
+              cat > "$ANDROID_AVD_HOME/pixel6a.ini" <<EOF
+              avd.ini.encoding=UTF-8
+              path=$ANDROID_AVD_HOME/pixel6a.avd
+              path.rel=avd/pixel6a.avd
+              target=android-31
+              EOF
               CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
               [ -f "$CFG" ] && sed -i 's/^hw.lcd.width=.*/hw.lcd.width=720/; s/^hw.lcd.height=.*/hw.lcd.height=1560/; s/^hw.lcd.density=.*/hw.lcd.density=280/; s/^hw.cpu.ncore=.*/hw.cpu.ncore=2/' "$CFG"
               ls "$ANDROID_AVD_HOME"
@@ -134,7 +134,7 @@ jobs:
         run: |
           rm -rf "$ANDROID_AVD_HOME"
           mkdir -p "$ANDROID_AVD_HOME"
-          echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-30;google_apis;x86_64" -d pixel_6a --force
+          echo no | $SDK/cmdline-tools/latest/bin/avdmanager create avd -n pixel6a -k "system-images;android-31;google_apis;x86_64" -d pixel_6a --force
           CFG="$ANDROID_AVD_HOME/pixel6a.avd/config.ini"
           cat >> "$CFG" <<EOF
           hw.lcd.width=720
@@ -155,13 +155,13 @@ jobs:
             -feature -Vulkan \
             -memory 2048 -cores 2 \
             -camera-back emulated -camera-front emulated \
-            > emulator.log 2>&1 &
+            > "${{ github.workspace }}/emulator.log" 2>&1 &
           for i in $(seq 1 90); do
             sleep 5
             BOOT=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             if [ "$BOOT" = "1" ]; then echo "BOOT OK at $((i*5))s"; break; fi
           done
-          echo '=== emulator.log (tail) ==='; tail -60 emulator.log || true
+          echo '=== emulator.log (tail) ==='; tail -60 "${{ github.workspace }}/emulator.log" || true
           $ADB shell getprop sys.boot_completed
           $ADB wait-for-device
           sleep 5
@@ -175,11 +175,15 @@ jobs:
       - name: Spoof device props (Pixel 6a, Moscow)
         if: github.event.inputs.action == 'run'
         run: |
-          $ADB root || true; sleep 3
-          $ADB remount || true; sleep 2
-          for f in /system/build.prop /vendor/build.prop; do
-            $ADB shell "su 0 sed -i 's/^ro.product.model=.*/ro.product.model=Pixel 6a/; s/^ro.product.brand=.*/ro.product.brand=google/; s/^ro.product.device=.*/ro.product.device=bluejay/; s/^ro.product.name=.*/ro.product.name=bluejay/' $f" 2>/dev/null || true
-          done
+          # build.prop правим ТОЛЬКО на свежем AVD (restored != 'yes') — иначе меняем fingerprint и Яндекс сбрасывает сессию
+          if [ "${{ env.restored }}" != "yes" ]; then
+            $ADB root || true; sleep 3
+            for f in /system/build.prop /vendor/build.prop; do
+              $ADB shell "su 0 sed -i 's/^ro.product.model=.*/ro.product.model=Pixel 6a/; s/^ro.product.brand=.*/ro.product.brand=google/; s/^ro.product.device=.*/ro.product.device=bluejay/; s/^ro.product.name=.*/ro.product.name=bluejay/' $f" 2>/dev/null || true
+            done
+          else
+            echo "restored=yes — build.prop не трогаем (сохраняем fingerprint)"
+          fi
           $ADB shell "su 0 setprop persist.sys.timezone Europe/Moscow" || true
           $ADB shell "settings put system time_zone Europe/Moscow" || true
           $ADB shell "setprop persist.sys.locale ru-RU" 2>/dev/null || true
@@ -199,27 +203,41 @@ jobs:
           sleep 2
 
       - name: ARM translation + Install Yandex Maps + Yandex app
-        if: github.event.inputs.action == 'run'
+        if: github.event.inputs.action == 'run' && env.restored != 'yes'
         run: |
           set -e
-          echo "=== Пересадка libndk_translation (ARM->x86_64) ==="
+          echo "=== Пересадка libndk_translation (ARM->x86_64), фаза A: disable-verity ==="
           $ADB root || true; sleep 3
           $ADB disable-verity || true
-          $ADB reboot
-          for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "REBOOT1 OK $((i*5))s"; break; }; done
+          echo "=== хост-рестарт эмулятора ==="
+          $ADB shell sync || true
+          $ADB shell reboot -p || true
+          for i in $(seq 1 30); do $ADB get-state >/dev/null 2>&1 || break; sleep 1; done
+          sleep 10
+          $ADB emu kill >/dev/null 2>&1 || true
+          sleep 20
+          cd "$ANDROID_AVD_HOME/.."
+          rm -rf "$ANDROID_AVD_HOME/pixel6a.avd/snapshots" "$ANDROID_AVD_HOME/pixel6a.avd/hardware-qemu.ini"
+          nohup $SDK/emulator/emulator -avd pixel6a \
+            -no-window -no-boot-anim -no-metrics -no-audio \
+            -gpu swiftshader_indirect -accel on -writable-system -no-snapshot \
+            -feature -Vulkan \
+            -memory 2048 -cores 2 \
+            -camera-back emulated -camera-front emulated \
+            > "${{ github.workspace }}/emulator.log" 2>&1 &
+          cd -
+          BOOTOK=0
+          for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "RESTART OK $((i*5))s"; BOOTOK=1; break; }; done
+          [ "$BOOTOK" = "1" ] || { echo "эмулятор не поднялся"; tail -60 "$GITHUB_WORKSPACE/emulator.log" || true; exit 1; }
           sleep 8; $ADB root || true; sleep 3
           $ADB remount; sleep 2
-          # тарбол транслятора из релиза maps-apk
-          gh release download maps-apk --repo Xyllep/gha-android --dir /tmp/nbdl --pattern 'libndk_translation-12.0.0.tar'
+          # тарбол транслятора из релиза maps-apk: один push вместо 96
+          gh release download maps-apk  --dir /tmp/nbdl --pattern 'libndk_translation-12.0.0.tar'
           mkdir -p /tmp/nb && tar -xf /tmp/nbdl/libndk_translation-12.0.0.tar -C /tmp/nb
-          cd /tmp/nb
-          for F in $(tar -tf /tmp/nbdl/libndk_translation-12.0.0.tar | grep -v '/$'); do
-            REL=${F#system/}
-            $ADB shell mkdir -p "/system/$(dirname $REL)"
-            $ADB push "$F" "/system/$REL" >/dev/null 2>&1 || echo "FAIL $REL"
-          done
+          cd /tmp/nb && tar cf /tmp/ndk.tar system && cd - >/dev/null
+          $ADB push /tmp/ndk.tar /data/local/tmp/ndk.tar
+          $ADB shell "tar -xf /data/local/tmp/ndk.tar -C / && rm /data/local/tmp/ndk.tar"
           $ADB shell chmod 755 /system/bin/arm64/* /system/bin/ndk_translation_program_runner_binfmt_misc_arm64 2>/dev/null || true
-          cd - >/dev/null
           # abilist: все три источника (odm/vendor/system) -> x86_64,arm64-v8a
           for PF in /system/build.prop /vendor/build.prop /odm/etc/build.prop; do
             $ADB pull $PF /tmp/bpx >/dev/null 2>&1 || { echo "нет $PF"; continue; }
@@ -230,13 +248,32 @@ jobs:
               -e "s|^ro.odm.product.cpu.abilist64=.*|ro.odm.product.cpu.abilist64=x86_64,arm64-v8a|" \
               -e "s|^ro.vendor.product.cpu.abilist64=.*|ro.vendor.product.cpu.abilist64=x86_64,arm64-v8a|" \
               -e "s|^ro.system.product.cpu.abilist64=.*|ro.system.product.cpu.abilist64=x86_64,arm64-v8a|" \
-              -e "s|^ro.dalvik.vm.native.bridge=.*|ro.dalvik.vm.native.bridge=libnb.so|" \
               /tmp/bpx
+            # native.bridge могло не быть в образе — добавляем принудительно
+            grep -q '^ro.dalvik.vm.native.bridge=' /tmp/bpx && sed -i "s|^ro.dalvik.vm.native.bridge=.*|ro.dalvik.vm.native.bridge=libnb.so|" /tmp/bpx || echo "ro.dalvik.vm.native.bridge=libnb.so" >> /tmp/bpx
             $ADB push /tmp/bpx $PF >/dev/null
             $ADB shell chmod 644 $PF
           done
-          $ADB reboot
-          for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "REBOOT2 OK $((i*5))s"; break; }; done
+          echo "=== фаза B: хост-рестарт после правки /system ==="
+          $ADB shell sync || true
+          $ADB shell reboot -p || true
+          for i in $(seq 1 30); do $ADB get-state >/dev/null 2>&1 || break; sleep 1; done
+          sleep 10
+          $ADB emu kill >/dev/null 2>&1 || true
+          sleep 20
+          cd "$ANDROID_AVD_HOME/.."
+          rm -rf "$ANDROID_AVD_HOME/pixel6a.avd/snapshots" "$ANDROID_AVD_HOME/pixel6a.avd/hardware-qemu.ini"
+          nohup $SDK/emulator/emulator -avd pixel6a \
+            -no-window -no-boot-anim -no-metrics -no-audio \
+            -gpu swiftshader_indirect -accel on -writable-system -no-snapshot \
+            -feature -Vulkan \
+            -memory 2048 -cores 2 \
+            -camera-back emulated -camera-front emulated \
+            > "${{ github.workspace }}/emulator.log" 2>&1 &
+          cd -
+          BOOTOK=0
+          for i in $(seq 1 60); do sleep 5; B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r'); [ "$B" = "1" ] && { echo "RESTART2 OK $((i*5))s"; BOOTOK=1; break; }; done
+          [ "$BOOTOK" = "1" ] || { echo "эмулятор не поднялся"; tail -60 "$GITHUB_WORKSPACE/emulator.log" || true; exit 1; }
           sleep 10
           echo "== abilist: $($ADB shell getprop ro.product.cpu.abilist)"
           echo "== bridge: $($ADB shell getprop ro.dalvik.vm.native.bridge)"
@@ -248,17 +285,19 @@ jobs:
 
           echo "=== Установка Карт ==="
           mkdir -p /tmp/apks && cd /tmp/apks
-          gh release download maps-apk --repo Xyllep/gha-android --dir /tmp/apks --pattern 'maps3021.apk'
+          gh release download maps-apk  --dir /tmp/apks --pattern 'maps3021.apk'
           unzip -t maps3021.apk >/dev/null && echo "apk OK" || echo "apk BROKEN"
           $ADB install -r -g maps3021.apk || echo "MAPS INSTALL FAILED (нефатально)"
           # Yandex app (3 сплита)
           mkdir -p /tmp/ya && cd /tmp/ya
           for A in yandex_base.apk config.ru.apk config.xhdpi.apk; do
-            U=$(gh api repos/Xyllep/gha-android/releases/tags/yandex-app -q ".assets[] | select(.name==\"$A\") | .url")
+            U=$(gh api repos/$GITHUB_REPOSITORY/releases/tags/yandex-app -q ".assets[] | select(.name==\"$A\") | .url")
             curl -sL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "$U" -o "$A"
           done
           $ADB install-multiple -r yandex_base.apk config.ru.apk config.xhdpi.apk || echo "yandex install failed"
           cd - >/dev/null
+          # маркер персистентности для диагностики рестора
+          $ADB shell "date > /data/local/tmp/persist_ok" || true
 
       - name: Open target URL
         if: github.event.inputs.url != ''
@@ -384,11 +423,12 @@ jobs:
           if [ "$MIN" -gt 350 ]; then MIN=350; fi
           echo "Session will run ${MIN} minutes. Ctrl-C not possible; sleep with status checks."
           END=$((SECONDS + MIN*60))
+          NEXT_SAVE=$((SECONDS + 600))
           while [ $SECONDS -lt $END ]; do
             sleep 60
-            # (старый 10-мин snapshot save убран: QuickBoot не используется, -no-snapshot)
             # каждые 15 мин: штатное выключение Android, tar покойного диска, подъем снова
-            if [ $((SECONDS % 900)) -lt 45 ] && [ "$SECONDS" -gt 300 ] && [ ! -f /tmp/avd_saving.lock ]; then
+            if [ "$SECONDS" -ge "$NEXT_SAVE" ] && [ ! -f /tmp/avd_saving.lock ]; then
+              NEXT_SAVE=$((SECONDS + 900))
               touch /tmp/avd_saving.lock
               echo "=== штатный shutdown Android ==="
               sleep 15
@@ -410,17 +450,19 @@ jobs:
               for q in "$AVDD"/*.qcow2; do
                 [ -f "$q" ] || continue
                 base="${q%.qcow2}"
-                [ -f "$base" ] && qemu-img rebase -u -F qcow2 -b "$(basename "$base")" "$q" || true
+                [ -f "$base" ] || continue
+                FMT=$(qemu-img info "$base" 2>/dev/null | awk -F': ' '/file format:/{print $2}')
+                [ -n "$FMT" ] && qemu-img rebase -u -F "$FMT" -b "$(basename "$base")" "$q" || true
               done
               cd "$ANDROID_AVD_HOME" && rm -f /tmp/avd.tar.gz /tmp/part_* /tmp/${TS}_part_* && tar czf /tmp/avd.tar.gz pixel6a.ini pixel6a.avd && cd -
               gzip -t /tmp/avd.tar.gz || { echo "tar битый, сейв пропущен"; rm -f /tmp/avd_saving.lock; }
               if [ -f /tmp/avd_saving.lock ]; then
                 split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/${TS}_part_
                 for TAG in avd-snap avd-backup; do
-                  gh release create $TAG --repo Xyllep/gha-android --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
-                  gh release upload $TAG /tmp/${TS}_part_* --repo Xyllep/gha-android --clobber && echo "AVD $TS -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
-                  for ID in $(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
-                    gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true
+                  gh release create $TAG  --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
+                  gh release upload $TAG /tmp/${TS}_part_*  --clobber && echo "AVD $TS -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
+                  for ID in $(gh api repos/$GITHUB_REPOSITORY/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
+                    gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/assets/$ID > /dev/null 2>&1 || true
                   done
                 done
                 rm -f /tmp/avd.tar.gz /tmp/${TS}_part_* /tmp/avd_saving.lock
@@ -432,7 +474,7 @@ jobs:
                 -gpu swiftshader_indirect -accel on -writable-system -no-snapshot \
                 -memory 2048 -cores 2 \
                 -camera-back emulated -camera-front emulated \
-                > emulator.log 2>&1 &
+                > "${{ github.workspace }}/emulator.log" 2>&1 &
               cd -
               for i in $(seq 1 60); do
                 sleep 5
@@ -452,7 +494,7 @@ jobs:
         if: github.event.inputs.action == 'snapshot'
         run: |
           # boot emulator briefly to write a clean snapshot of current AVD state
-          nohup $SDK/emulator/emulator -avd pixel6a -no-window -no-boot-anim -no-metrics -no-audio -gpu swiftshader_indirect -accel on > snap_boot.log 2>&1 &
+          nohup $SDK/emulator/emulator -avd pixel6a -no-window -no-boot-anim -no-metrics -no-audio -gpu swiftshader_indirect -accel on -writable-system -no-snapshot -feature -Vulkan -memory 2048 -cores 2 > "${{ github.workspace }}/snap_boot.log" 2>&1 &
           for i in $(seq 1 60); do
             sleep 5
             B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
@@ -476,7 +518,9 @@ jobs:
           for q in "$AVDD"/*.qcow2; do
             [ -f "$q" ] || continue
             base="${q%.qcow2}"
-            [ -f "$base" ] && qemu-img rebase -u -F qcow2 -b "$(basename "$base")" "$q" || true
+            [ -f "$base" ] || continue
+            FMT=$(qemu-img info "$base" 2>/dev/null | awk -F': ' '/file format:/{print $2}')
+            [ -n "$FMT" ] && qemu-img rebase -u -F "$FMT" -b "$(basename "$base")" "$q" || true
           done
           cd "$ANDROID_AVD_HOME"
           rm -f /tmp/avd-snapshot.tar.gz /tmp/part_* /tmp/${TS}_part_* 2>/dev/null
@@ -485,10 +529,10 @@ jobs:
           ls -la /tmp/avd-snapshot.tar.gz
           split -b 900m -d -a 2 /tmp/avd-snapshot.tar.gz /tmp/${TS}_part_
           for TAG in avd-snap avd-backup; do
-            gh release create $TAG --repo Xyllep/gha-android --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
-            gh release upload $TAG /tmp/${TS}_part_* --repo Xyllep/gha-android --clobber || echo "upload to $TAG FAILED"
-            for ID in $(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
-              gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true
+            gh release create $TAG  --title "AVD snapshot" --notes "pixel6a AVD + snapshots (autostate)" 2>/dev/null || true
+            gh release upload $TAG /tmp/${TS}_part_*  --clobber || echo "upload to $TAG FAILED"
+            for ID in $(gh api repos/$GITHUB_REPOSITORY/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
+              gh api -X DELETE repos/$GITHUB_REPOSITORY/releases/assets/$ID > /dev/null 2>&1 || true
             done
           done
           echo "uploaded"
@@ -500,7 +544,8 @@ jobs:
           name: interactive-session
           path: |
             emulator.log
-            ws-scrcpy.log
+            snap_boot.log
             cf.log
-            tunnel_url.txt
+            tunnel_url_live.txt
+            /opt/wsscrcpy/dist/ws.log
           if-no-files-found: ignore
