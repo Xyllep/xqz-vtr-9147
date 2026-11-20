@@ -384,23 +384,44 @@ jobs:
             if [ $((SECONDS % 600)) -lt 60 ] && [ "$SECONDS" -gt 300 ]; then
               $ADB emu snapshot save autostate 2>/dev/null && echo "snapshot saved at ${SECONDS}s" || echo "snapshot save failed"
             fi
-            # каждые 15 мин заливаем AVD в Release (переживёт ран), частями <2ГБ, на 2 тега
+            # каждые 15 мин: СТАРЫЙ МЕХАНИЗМ — глушим эмулятор, снимаем tar с покоящегося диска, поднимаем снова
             if [ $((SECONDS % 900)) -lt 45 ] && [ "$SECONDS" -gt 300 ] && [ ! -f /tmp/avd_saving.lock ]; then
               touch /tmp/avd_saving.lock
+              echo "=== старый механизм сейва: глушим эмулятор ==="
+              $ADB emu snapshot save autostate 2>/dev/null || true
+              sleep 10
+              $ADB emu kill || true
+              sleep 20
               TS="s$(date -u +%Y%m%d%H%M%S)"
               cd "$ANDROID_AVD_HOME/.." && rm -f /tmp/avd.tar.gz /tmp/part_* /tmp/${TS}_part_* && tar czf /tmp/avd.tar.gz avd && cd -
-              gzip -t /tmp/avd.tar.gz || { echo "tar битый, сейв пропущен"; rm -f /tmp/avd_saving.lock; continue; }
-              split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/${TS}_part_
-              for TAG in avd-snap avd-backup; do
-                gh release create $TAG --repo Xyllep/gha-android --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
-                gh release upload $TAG /tmp/${TS}_part_* --repo Xyllep/gha-android --clobber && echo "AVD $TS -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
-                # удаляем все части не от текущего сейва
-                for ID in $(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
-                  gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true
+              gzip -t /tmp/avd.tar.gz || { echo "tar битый, сейв пропущен"; rm -f /tmp/avd_saving.lock; }
+              if [ -f /tmp/avd_saving.lock ]; then
+                split -b 900m -d -a 2 /tmp/avd.tar.gz /tmp/${TS}_part_
+                for TAG in avd-snap avd-backup; do
+                  gh release create $TAG --repo Xyllep/gha-android --title "AVD snapshot" --notes "autostate" 2>/dev/null || true
+                  gh release upload $TAG /tmp/${TS}_part_* --repo Xyllep/gha-android --clobber && echo "AVD $TS -> $TAG at ${SECONDS}s" || echo "upload to $TAG FAILED"
+                  for ID in $(gh api repos/Xyllep/gha-android/releases/tags/$TAG --jq ".assets[] | select(.name | startswith(\"${TS}_\") | not) | .id" 2>/dev/null); do
+                    gh api -X DELETE repos/Xyllep/gha-android/releases/assets/$ID > /dev/null 2>&1 || true
+                  done
                 done
+                rm -f /tmp/avd.tar.gz /tmp/${TS}_part_* /tmp/avd_saving.lock
+              fi
+              echo "=== поднимаем эмулятор снова ==="
+              cd "$ANDROID_AVD_HOME/.."
+              nohup $SDK/emulator/emulator -avd pixel6a \
+                -no-window -no-boot-anim -no-metrics -no-audio \
+                -gpu swiftshader_indirect -accel on \
+                -memory 2048 -cores 2 \
+                -camera-back emulated -camera-front emulated \
+                > emulator.log 2>&1 &
+              cd -
+              for i in $(seq 1 60); do
+                sleep 5
+                B=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+                [ "$B" = "1" ] && { echo "reboot OK at $((i*5))s"; break; }
               done
-              rm -f /tmp/avd.tar.gz /tmp/${TS}_part_* /tmp/avd_saving.lock
-              echo "cleanup done"
+              $ADB shell input keyevent 82 || true
+              $ADB shell wm dismiss-keyguard || true
             fi
             # health: туннель жив?
             if ! grep -q "trycloudflare" cf.log 2>/dev/null; then echo "tunnel log missing"; fi
