@@ -22,6 +22,9 @@ on:
       script:
         description: "Имя скрипта из scripts/ — выполняется после установки приложений (диагностика)"
         default: ""
+      fresh:
+        description: "yes = поднять AVD с нуля, НЕ восстанавливать сейв из Release"
+        default: ""
 
 jobs:
   interactive:
@@ -75,6 +78,7 @@ jobs:
           df -h /
 
       - name: Restore AVD snapshot from Release
+        if: github.event.inputs.fresh != 'yes'
         run: |
           # сейв: основной Release avd-snap, резервный avd-backup; части part_* или старый avd-live.tar.gz
           rm -rf /tmp/avdparts && mkdir -p /tmp/avdparts
