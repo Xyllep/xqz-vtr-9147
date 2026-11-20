@@ -141,6 +141,7 @@ jobs:
             BOOT=$($ADB shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             if [ "$BOOT" = "1" ]; then echo "BOOT OK at $((i*5))s"; break; fi
           done
+          echo '=== emulator.log (tail) ==='; tail -60 emulator.log || true
           $ADB shell getprop sys.boot_completed
           $ADB wait-for-device
           sleep 5
