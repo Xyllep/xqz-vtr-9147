@@ -259,14 +259,20 @@ jobs:
           # ставим ADBKeyboard (input text не умеет кириллицу)
           curl -sL -o /tmp/adbkey.apk https://github.com/senzhk/ADBKeyBoard/raw/master/ADBKeyboard.apk
           $ADB install -r -g /tmp/adbkey.apk || echo "adbkey install failed"
+          sleep 8
+          echo "IME list: $($ADB shell ime list -s | tr -d '\r' | tr '\n' ' ')"
           $ADB shell ime enable com.android.adbkeyboard/.AdbIME || true
+          if ! $ADB shell ime list -s | grep -q AdbIME; then
+            echo "ime enable не сработал — fallback через settings put"
+            $ADB shell settings put secure enabled_input_methods com.android.adbkeyboard/.AdbIME || true
+          fi
           # тап по полю (720x1560) — клавиатура открывается на сфокусированном поле
           $ADB shell input tap 360 680
           sleep 3
           # переключаем IME при активном поле
-          $ADB shell ime set com.android.adbkeyboard/.AdbIME
+          $ADB shell ime set com.android.adbkeyboard/.AdbIME || $ADB shell settings put secure default_input_method com.android.adbkeyboard/.AdbIME
           sleep 2
-          echo "IME now: $($ADB shell settings get secure default_input_method)"
+          echo "IME now: $($ADB shell settings get secure default_input_method) IMEs: $($ADB shell ime list -s | tr -d '\r' | tr '\n' ' ')"
           B64=$(printf '%s' "${{ github.event.inputs.review_text }}" | base64 -w0)
           FRAG=$(printf '%s' "${{ github.event.inputs.review_text }}" | cut -c1-12)
           # до 3 попыток: broadcast -> проверка uiautomator
