@@ -1,0 +1,33 @@
+name: Mutabor trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_group:
+        description: "Страна: ge fr ee nl usa sw rusw lt ltu fl"
+        default: "ge"
+
+permissions:
+  contents: write
+
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run full cycle
+        run: python3 mutabor.py
+        env:
+          MUTABOR_GROUP: ${{ github.event.inputs.server_group }}
+
+      - name: Show account
+        run: cat mutabor_account.json
+
+      - name: Upload account
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutabor-account
+          path: mutabor_account.json
